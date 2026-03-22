@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Keep screen on during emulation -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Direct filesystem access for built-in filepicker (sideloaded APK) -->
+    <!-- READ/WRITE_EXTERNAL_STORAGE: covers Android 10 and below -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <!--
+        MANAGE_EXTERNAL_STORAGE: required on Android 11+ (API 30+).
+        requestLegacyExternalStorage is silently ignored on Android 11+, so this
+        is the only way to read arbitrary file types (e.g. .a78, .a26, .bin) from
+        shared storage. Permitted for sideloaded APKs; not allowed on Google Play
+        for most app categories. The runtime check in EMU7800Activity redirects the
+        user to Settings > Special app access > All files access before SDL starts.
+    -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:requestLegacyExternalStorage="true">
+
+        <activity
+            android:name=".EMU7800Activity"
+            android:exported="true"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|density|uiMode"
+            android:screenOrientation="landscape"
+            android:supportsPictureInPicture="false"
+            android:label="@string/app_name"
+            android:keepScreenOn="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>

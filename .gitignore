@@ -1,0 +1,17 @@
+# Build outputs
+build/
+app/build/
+.cxx/
+
+# Local configuration (SDK/NDK paths — machine-specific)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.gradle/
+captures/
+
+# OS
+.DS_Store
+Thumbs.db

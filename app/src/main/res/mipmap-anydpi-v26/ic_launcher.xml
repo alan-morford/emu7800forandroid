@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Background: solid black — hidden behind the full-bleed foreground -->
+    <background android:drawable="@color/ic_launcher_background" />
+    <!-- Foreground: icon scaled to fill the full 108dp canvas so the system
+         shape mask clips the icon directly with no white surround. -->
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
