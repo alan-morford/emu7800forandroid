@@ -26,14 +26,24 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            storeFile     file('release-key.jks')
+            storePassword 'Emu7800@Secure#2024'
+            keyAlias      'emu7800-release'
+            keyPassword   'Emu7800@Secure#2024'
+        }
+    }
+
     buildTypes {
         debug {
             debuggable true
             jniDebuggable true
         }
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig    signingConfigs.release
+            minifyEnabled    false
+            shrinkResources  false
         }
     }
 

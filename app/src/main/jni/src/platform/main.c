@@ -477,6 +477,13 @@ int SDL_main(int argc, char *argv[])
 
         } else {
             /* FILEPICKER state */
+            /* g_back_flag may be set by the controller View button OR by the
+             * hardware back key when Android routes it through the gamepad
+             * device (controller connected).  Handle it the same way as the
+             * SDL SDLK_AC_BACK key event. */
+            if (input_back_pressed()) {
+                filepicker_back();
+            }
             SDL_Renderer *r = video_get_renderer();
             if (r) {
                 filepicker_draw(r);
