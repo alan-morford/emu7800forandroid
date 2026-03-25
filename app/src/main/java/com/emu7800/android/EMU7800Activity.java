@@ -39,6 +39,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.TextView;
+import android.media.AudioManager;
 import android.widget.Toast;
 
 import org.libsdl.app.SDLActivity;
@@ -168,6 +169,20 @@ public class EMU7800Activity extends SDLActivity {
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (am != null) {
+                    am.adjustStreamVolume(
+                        AudioManager.STREAM_MUSIC,
+                        keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                            ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER,
+                        AudioManager.FLAG_SHOW_UI);
+                }
+            }
+            return true;
+        }
         int src = event.getSource();
         if ((src & InputDevice.SOURCE_GAMEPAD)  != 0 ||
             (src & InputDevice.SOURCE_JOYSTICK) != 0) {
