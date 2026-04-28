@@ -42,7 +42,18 @@ import android.widget.TextView;
 import android.media.AudioManager;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.libsdl.app.SDLActivity;
+
+import java.io.BufferedReader;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 public class EMU7800Activity extends SDLActivity {
 
@@ -573,6 +584,12 @@ public class EMU7800Activity extends SDLActivity {
     public static native void nativeControllerAxis(int axis, float value);
 
     /**
+     * Called from Java's update-check thread when a newer GitHub release is confirmed.
+     * version: e.g. "1.0.2", note: release body text, url: html_url of the release.
+     */
+    public static native void nativeUpdateResult(String version, String note, String url);
+
+    /**
      * Called from native when the user presses Back while the filepicker is
      * already at /storage/emulated/0/.  Implements the standard Android
      * double-back-to-exit pattern: Toast on first press, finish() on second
@@ -613,6 +630,189 @@ public class EMU7800Activity extends SDLActivity {
             a.getWindow().setAttributes(lp);
             Log.i(TAG, "setCutoutMode: " + enabled);
         });
+    }
+
+    /* ---- Update check ---- */
+
+    private static final String GITHUB_RELEASES_URL =
+            "https://api.github.com/repos/alan-morford/emu7800forandroid/releases/latest";
+
+    /**
+     * Called from native (updater.c → jni_start_update_check) to kick off the
+     * background HTTPS fetch against the GitHub Releases API.
+     * Runs the network call on a daemon thread so it never blocks the UI.
+     */
+    public static void startUpdateCheck() {
+        Thread t = new Thread(() -> {
+            try {
+                URL url = new URL(GITHUB_RELEASES_URL);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                conn.setRequestProperty("User-Agent", "EMU7800-Android");
+
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    Log.w(TAG, "Update check: HTTP " + code);
+                    return;
+                }
+
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                }
+
+                JSONObject json    = new JSONObject(sb.toString());
+                String tagName     = json.optString("tag_name", "");
+                String body        = json.optString("body", "");
+                String htmlUrl     = json.optString("html_url", "");
+
+                /* Find the .apk asset download URL; fall back to html_url */
+                String apkUrl = "";
+                JSONArray assets = json.optJSONArray("assets");
+                if (assets != null) {
+                    for (int i = 0; i < assets.length(); i++) {
+                        JSONObject asset = assets.getJSONObject(i);
+                        String dlUrl = asset.optString("browser_download_url", "");
+                        if (dlUrl.toLowerCase().endsWith(".apk")) {
+                            apkUrl = dlUrl;
+                            break;
+                        }
+                    }
+                }
+                if (apkUrl.isEmpty()) apkUrl = htmlUrl;
+
+                /* Strip leading 'v' prefix from tag name */
+                String remoteVer = tagName.startsWith("v") ? tagName.substring(1) : tagName;
+                String localVer  = "";
+                try {
+                    EMU7800Activity inst = sInstance;
+                    if (inst != null)
+                        localVer = inst.getPackageManager()
+                                       .getPackageInfo(inst.getPackageName(), 0).versionName;
+                } catch (Exception ignored) {}
+
+                Log.i(TAG, "Update check: local=" + localVer + " remote=" + remoteVer
+                        + " apkUrl=" + apkUrl);
+
+                if (!remoteVer.isEmpty() && isNewerVersion(localVer, remoteVer)) {
+                    /* Truncate long release notes for the popup */
+                    if (body.length() > 400) body = body.substring(0, 400) + "...";
+                    nativeUpdateResult(remoteVer, body, apkUrl);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Update check failed: " + e.getMessage());
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Returns true if remoteVersion is strictly newer than localVersion (major.minor.patch). */
+    private static boolean isNewerVersion(String local, String remote) {
+        try {
+            String[] l = local.split("\\.");
+            String[] r = remote.split("\\.");
+            int len = Math.max(l.length, r.length);
+            for (int i = 0; i < len; i++) {
+                int lv = i < l.length ? Integer.parseInt(l[i]) : 0;
+                int rv = i < r.length ? Integer.parseInt(r[i]) : 0;
+                if (rv > lv) return true;
+                if (rv < lv) return false;
+            }
+        } catch (NumberFormatException ignored) {}
+        return false;
+    }
+
+    /**
+     * Called from filepicker.c (via jni_bridge.c) when the user taps "UPDATE"
+     * in the in-app update popup.  Downloads the APK on a background thread
+     * and launches the system package installer on completion.
+     * On Android 7+ uses PackageInstaller to avoid FileUriExposedException;
+     * on Android 5-6 uses a file:// URI directly.
+     */
+    public static void downloadAndInstallApk(final String url) {
+        EMU7800Activity a = sInstance;
+        if (a == null || url == null || url.isEmpty()) return;
+        Log.i(TAG, "downloadAndInstallApk: " + url);
+        new Thread(() -> {
+            java.io.File outFile = new java.io.File(a.getCacheDir(), "emu7800_update.apk");
+            try {
+                URL apkUrl = new URL(url);
+                HttpURLConnection conn = (HttpURLConnection) apkUrl.openConnection();
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(60000);
+                conn.connect();
+                if (conn.getResponseCode() != 200) {
+                    Log.w(TAG, "downloadAndInstallApk: HTTP " + conn.getResponseCode());
+                    return;
+                }
+                try (InputStream in = conn.getInputStream();
+                     OutputStream out = new FileOutputStream(outFile)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+                Log.i(TAG, "downloadAndInstallApk: downloaded " + outFile.length() + " bytes");
+            } catch (Exception e) {
+                Log.w(TAG, "downloadAndInstallApk: download failed: " + e.getMessage());
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                /* Android 7+: use PackageInstaller.Session to avoid FileUriExposedException */
+                try {
+                    android.content.pm.PackageInstaller installer =
+                            a.getPackageManager().getPackageInstaller();
+                    android.content.pm.PackageInstaller.SessionParams params =
+                            new android.content.pm.PackageInstaller.SessionParams(
+                                    android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+                    int sessionId = installer.createSession(params);
+                    android.content.pm.PackageInstaller.Session session = installer.openSession(sessionId);
+                    try (InputStream in = new FileInputStream(outFile);
+                         OutputStream out = session.openWrite(outFile.getName(), 0, outFile.length())) {
+                        byte[] buf = new byte[65536];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                        session.fsync(out);
+                    }
+                    android.content.Intent resultIntent = new android.content.Intent(a, EMU7800Activity.class);
+                    int piFlags = android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                        piFlags |= android.app.PendingIntent.FLAG_MUTABLE;
+                    android.app.PendingIntent pi =
+                            android.app.PendingIntent.getActivity(a, 0, resultIntent, piFlags);
+                    session.commit(pi.getIntentSender());
+                    session.close();
+                } catch (Exception e) {
+                    Log.e(TAG, "downloadAndInstallApk: PackageInstaller failed: " + e.getMessage());
+                }
+            } else {
+                /* Android 5-6: file:// URI accepted by installer */
+                final Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(Uri.fromFile(outFile),
+                        "application/vnd.android.package-archive");
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                a.runOnUiThread(() -> {
+                    try { a.startActivity(intent); }
+                    catch (Exception e) { Log.e(TAG, "downloadAndInstallApk: " + e.getMessage()); }
+                });
+            }
+        }).start();
+    }
+
+    /** Opens a URL in the device's default browser. */
+    public static void openUrl(String url) {
+        EMU7800Activity a = sInstance;
+        if (a == null || url == null || url.isEmpty()) return;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            a.startActivity(intent);
+        } catch (Exception e) {
+            Log.w(TAG, "openUrl: " + e.getMessage());
+        }
     }
 
     /** Opens a mailto: intent for the EMU7800 bug report email. */

@@ -69,7 +69,7 @@ int audio_init(void)
     g_ring_read   = 0;
     g_ring_write  = 0;
 
-    SDL_PauseAudioDevice(g_audio_dev, 0);  /* start playback */
+    SDL_PauseAudioDevice(g_audio_dev, 1);  /* start paused — caller resumes after first frame */
     return 0;
 }
 
@@ -111,6 +111,14 @@ void audio_pause(int pause)
 {
     if (g_audio_dev > 0)
         SDL_PauseAudioDevice(g_audio_dev, pause);
+}
+
+/* Discard all buffered samples.  Call while audio is paused and the emulator
+ * thread is stopped to avoid stale samples bleeding into the next ROM. */
+void audio_flush(void)
+{
+    g_ring_read  = 0;
+    g_ring_write = 0;
 }
 
 int audio_get_sample_rate(void)

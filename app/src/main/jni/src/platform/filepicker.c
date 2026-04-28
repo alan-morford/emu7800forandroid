@@ -29,6 +29,8 @@
 #include "machine.h"
 #include "video.h"
 #include "input.h"
+#include "zip_load.h"
+#include "updater.h"
 #include "asteroids_img.h"
 #include "logo_img.h"
 #include "gear_img.h"
@@ -38,6 +40,8 @@ extern void log_msg(const char *msg);
 extern void jni_send_bug_report_email(void);
 extern void jni_filepicker_at_root(void);
 extern void jni_set_cutout_mode(int enabled);
+extern void jni_download_and_install_apk(const char *url);
+extern void jni_open_url(const char *url);
 
 /* ---- Constants ---- */
 
@@ -130,6 +134,7 @@ static int  g_notfound_recent_idx     = -1;
 static int  g_dirpicker_popup_visible   = 0;
 static int  g_about_popup_visible       = 0;
 static int  g_autosave_warn_visible     = 0;
+static int  g_update_popup_visible      = 0;
 
 /* Directory picker */
 static DirEntry g_dirpicker_dirs[DIRPICKER_MAX];
@@ -164,7 +169,7 @@ static void get_recent_path(char *buf, int bufsz)
 
 /* ---- ROM type detection ---- */
 
-static int get_rom_type(const char *name)
+static int get_rom_type(const char *name, const char *fullpath)
 {
     const char *dot = strrchr(name, '.');
     if (!dot) return ENTRY_FILE;
@@ -173,6 +178,10 @@ static int get_rom_type(const char *name)
     if (strcasecmp(dot, ".bin") == 0) return MACHINE_2600;
     if (strcasecmp(dot, ".rom") == 0) return MACHINE_2600;
     if (strcasecmp(dot, ".sav") == 0) return ENTRY_SAV;
+    if (strcasecmp(dot, ".zip") == 0) {
+        int mt = zip_probe_machine_type(fullpath);
+        return mt >= 0 ? mt : ENTRY_FILE;
+    }
     return ENTRY_FILE;
 }
 
@@ -608,7 +617,7 @@ void filepicker_scan(const char *directory)
         if (stat(fullpath, &st) != 0) continue;
 
         int is_dir = S_ISDIR(st.st_mode);
-        int type   = is_dir ? ENTRY_DIR : get_rom_type(ent->d_name);
+        int type   = is_dir ? ENTRY_DIR : get_rom_type(ent->d_name, fullpath);
 
         /* Hide unrecognized files; show .sav save-state files in purple */
         if (type == ENTRY_FILE) continue;
@@ -692,7 +701,7 @@ static void dirpicker_scan(const char *directory)
         snprintf(fullpath, MAX_PATH_LEN, "%s%s", g_dirpicker_current, ent->d_name);
         if (stat(fullpath, &st) != 0) continue;
         int entry_is_dir = S_ISDIR(st.st_mode);
-        int entry_type   = entry_is_dir ? ENTRY_DIR : get_rom_type(ent->d_name);
+        int entry_type   = entry_is_dir ? ENTRY_DIR : get_rom_type(ent->d_name, fullpath);
         /* Include directories and ROM files; skip everything else */
         if (!entry_is_dir && !is_rom_type(entry_type)) continue;
         DirEntry *d = &g_dirpicker_dirs[g_dirpicker_count++];
@@ -1395,6 +1404,81 @@ static void draw_about_popup(SDL_Renderer *r, const FPLayout *L)
     SDL_RenderSetClipRect(r, NULL);
 }
 
+static void draw_update_popup(SDL_Renderer *r, const FPLayout *L)
+{
+    const char *version = updater_get_version();
+    const char *note    = updater_get_note();
+
+    int btn_h   = L->resume_h;
+    int title_h = 10 * L->title_scale + 8;
+    int line_h  = 8 * L->font_scale + 6;
+
+    /* Build lines: version line + up to 6 note lines split on \n */
+    char lines[7][128];
+    int nlines = 0;
+    {
+        char ver_line[80];
+        snprintf(ver_line, sizeof(ver_line), "Version %s is available", version);
+        strncpy(lines[nlines], ver_line, 127);
+        lines[nlines++][127] = '\0';
+    }
+    if (note && note[0]) {
+        char tmp[512];
+        strncpy(tmp, note, 511); tmp[511] = '\0';
+        char *p = tmp;
+        while (nlines < 7 && p && *p) {
+            char *nl = strchr(p, '\n');
+            if (nl) *nl = '\0';
+            strncpy(lines[nlines], p, 127);
+            lines[nlines++][127] = '\0';
+            p = nl ? nl + 1 : NULL;
+        }
+    }
+
+    int pw = fp_popup_w(FP_WIDE_W_DP, L->sw);
+    for (int i = 0; i < nlines; i++) {
+        int lw = font_string_width(lines[i], L->font_scale) + 28;
+        if (lw > pw) pw = lw;
+    }
+    if (pw > L->sw * 9 / 10) pw = L->sw * 9 / 10;
+
+    int ph = title_h + 8 + nlines * line_h + 16 + btn_h + 8;
+    if (ph > L->sh * 9 / 10) ph = L->sh * 9 / 10;
+    int px = (L->sw - pw) / 2;
+    int py = (L->sh - ph) / 2;
+    fp_popup_bg(r, px, py, pw, ph);
+
+    font_draw_string(r, "UPDATE AVAILABLE", px + 12, py + 8, L->title_scale, 200, 100, 0);
+    SDL_SetRenderDrawColor(r, 180, 120, 0, 200);
+    SDL_RenderDrawLine(r, px + 4, py + title_h, px + pw - 4, py + title_h);
+
+    int ty = py + title_h + 8;
+    SDL_Rect clip = {px + 4, py + title_h + 2, pw - 8, ph - title_h - btn_h - 20};
+    SDL_RenderSetClipRect(r, &clip);
+    for (int i = 0; i < nlines; i++) {
+        if (lines[i][0]) {
+            Uint8 cr = (i == 0) ? 255 : 220;
+            Uint8 cg = (i == 0) ? 200 : 220;
+            Uint8 cb = (i == 0) ?  80 : 220;
+            font_draw_string(r, lines[i], px + 12, ty, L->font_scale, cr, cg, cb);
+        }
+        ty += line_h;
+    }
+    SDL_RenderSetClipRect(r, NULL);
+
+    /* Two buttons at bottom: UPDATE (left) and LATER (right) */
+    int bw = (pw - 24) / 2;
+    int by = py + ph - btn_h - 8;
+    int bx_upd = px + 8;
+    int bx_lat = px + pw - bw - 8;
+
+    fp_fill_rect(r, bx_upd, by, bw, btn_h, 60, 60, 60, 220);
+    fp_centered_text(r, "UPDATE", bx_upd, by, bw, btn_h, L->font_scale, 200, 100, 0);
+
+    fp_fill_rect(r, bx_lat, by, bw, btn_h, 60, 60, 60, 220);
+    fp_centered_text(r, "LATER", bx_lat, by, bw, btn_h, L->font_scale, 160, 80, 0);
+}
+
 /* ---- Main draw ---- */
 
 void filepicker_draw(SDL_Renderer *r)
@@ -1469,6 +1553,15 @@ void filepicker_draw(SDL_Renderer *r)
             font_draw_string(r, ch, tx + i * cw, ty, scale,
                             colors[ci][0], colors[ci][1], colors[ci][2]);
         }
+    }
+
+    /* Flashing "UPDATE" label — visible to the left of the gear when an update is ready.
+     * Flashes at 1 Hz (500 ms on / 500 ms off) to attract attention. */
+    if (updater_has_update() && (SDL_GetTicks() / 500) % 2 == 0) {
+        int upd_w = font_string_width("UPDATE", L.font_scale);
+        int upd_x = L.gear_x - upd_w - 10;
+        int upd_y = L.gear_y + (L.gear_w - 8 * L.font_scale) / 2;
+        font_draw_string(r, "UPDATE", upd_x, upd_y, L.font_scale, 255, 80, 0);
     }
 
     /* Gear icon (top-right of top bar) */
@@ -1580,6 +1673,7 @@ void filepicker_draw(SDL_Renderer *r)
     if (g_about_popup_visible)     draw_about_popup(r, &L);
     if (g_autosave_warn_visible)   draw_autosave_warn_popup(r, &L);
     if (g_first_launch_popup)      draw_first_launch_popup(r, &L);
+    if (g_update_popup_visible)    draw_update_popup(r, &L);
 
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
 }
@@ -1588,6 +1682,7 @@ void filepicker_draw(SDL_Renderer *r)
 
 static int close_topmost_popup(void)
 {
+    if (g_update_popup_visible)    { g_update_popup_visible    = 0; return 1; }
     if (g_about_popup_visible)     { g_about_popup_visible     = 0; return 1; }
     if (g_dirpicker_popup_visible) { g_dirpicker_popup_visible = 0; return 1; }
     if (g_settings_popup_visible)  { g_settings_popup_visible  = 0; return 1; }
@@ -1605,7 +1700,8 @@ static int any_popup_visible(void)
     return g_first_launch_popup    || g_save_popup_visible || g_delete_confirm_visible ||
            g_notfound_visible ||
            g_recent_popup_visible  || g_settings_popup_visible ||
-           g_dirpicker_popup_visible || g_about_popup_visible || g_autosave_warn_visible;
+           g_dirpicker_popup_visible || g_about_popup_visible || g_autosave_warn_visible ||
+           g_update_popup_visible;
 }
 
 /* Close every popup so a newly-opened one is always on a clean slate. */
@@ -1619,6 +1715,7 @@ static void close_all_popups(void)
     g_save_popup_visible      = 0;
     g_delete_confirm_visible  = 0;
     g_notfound_visible        = 0;
+    g_update_popup_visible    = 0;
 }
 
 void filepicker_back(void)
@@ -2040,6 +2137,53 @@ int filepicker_touch_up(int x, int y)
         return 0;
     }
 
+    if (g_update_popup_visible) {
+        /* Mirror draw_update_popup geometry */
+        int btn_h   = L.resume_h;
+        int title_h = 10 * L.title_scale + 8;
+        int line_h  = 8 * L.font_scale + 6;
+        const char *note = updater_get_note();
+        int nlines = 1;  /* version line */
+        if (note && note[0]) {
+            const char *p = note;
+            while (nlines < 7 && p && *p) {
+                const char *nl = strchr(p, '\n');
+                nlines++;
+                p = nl ? nl + 1 : NULL;
+            }
+        }
+        int pw = fp_popup_w(FP_WIDE_W_DP, L.sw);
+        if (pw > L.sw * 9 / 10) pw = L.sw * 9 / 10;
+        int ph = title_h + 8 + nlines * line_h + 16 + btn_h + 8;
+        if (ph > L.sh * 9 / 10) ph = L.sh * 9 / 10;
+        int px = (L.sw - pw) / 2;
+        int py = (L.sh - ph) / 2;
+        int bw = (pw - 24) / 2;
+        int by = py + ph - btn_h - 8;
+        int bx_upd = px + 8;
+        int bx_lat = px + pw - bw - 8;
+        /* UPDATE button */
+        if (!g_touch_moved && x >= bx_upd && x < bx_upd + bw && y >= by && y < by + btn_h) {
+            const char *apk_url = updater_get_url();
+            size_t ulen = strlen(apk_url);
+            if (ulen >= 4 && strcasecmp(apk_url + ulen - 4, ".apk") == 0)
+                jni_download_and_install_apk(apk_url);
+            else if (apk_url[0])
+                jni_open_url(apk_url);
+        }
+        /* LATER button */
+        else if (!g_touch_moved && x >= bx_lat && x < bx_lat + bw && y >= by && y < by + btn_h) {
+            updater_dismiss();
+            g_update_popup_visible = 0;
+        }
+        /* Tap outside → close */
+        else if (x < px || x > px + pw || y < py || y > py + ph) {
+            g_update_popup_visible = 0;
+        }
+        g_touch_active = 0;
+        return 0;
+    }
+
     if (g_settings_popup_visible) {
         int btn_h_s = L.resume_h;
         int row_h   = btn_h_s + 16;
@@ -2189,6 +2333,18 @@ int filepicker_touch_up(int x, int y)
 
     /* Top bar */
     if (y < L.top_h) {
+        /* UPDATE label — tapping it (re)opens the update popup */
+        if (updater_has_update()) {
+            int upd_tw = font_string_width("UPDATE", L.font_scale);
+            int upd_tx = L.gear_x - upd_tw - 10;
+            int upd_ty = L.gear_y + (L.gear_w - 8 * L.font_scale) / 2;
+            if (x >= upd_tx - 4 && x <= upd_tx + upd_tw + 4 &&
+                y >= upd_ty - 4 && y <= upd_ty + 8 * L.font_scale + 4) {
+                g_update_popup_visible = 1;
+                g_touch_active = 0;
+                return 0;
+            }
+        }
         /* Gear icon */
         if (x >= L.gear_x && x <= L.gear_x + L.gear_w &&
             y >= L.gear_y && y <= L.gear_y + L.gear_w) {

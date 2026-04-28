@@ -34,6 +34,7 @@ extern void filepicker_set_display_density(float density);
 extern void filepicker_set_has_cutout(int has_cutout);
 extern void input_set_display_density(float density);
 extern void filepicker_rescan(void);
+extern void updater_set_result(const char *version, const char *note, const char *url);
 
 /* Cache directory set by nativeSetCacheDir() during Activity.onCreate(). */
 static char g_cache_dir[512] = "/data/local/tmp";
@@ -303,4 +304,118 @@ void jni_open_rom_picker(void)
 
     (*env)->DeleteLocalRef(env, cls);
     (*env)->DeleteLocalRef(env, activity);
+}
+
+/*
+ * Called from updater.c to ask Java to start the background GitHub update check.
+ */
+void jni_start_update_check(void)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    if (!env) { LOGE("jni_start_update_check: no JNIEnv"); return; }
+
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!activity) { LOGE("jni_start_update_check: no activity"); return; }
+
+    jclass cls = (*env)->GetObjectClass(env, activity);
+    if (!cls) {
+        (*env)->DeleteLocalRef(env, activity);
+        LOGE("jni_start_update_check: GetObjectClass failed");
+        return;
+    }
+
+    jmethodID mid = (*env)->GetStaticMethodID(env, cls, "startUpdateCheck", "()V");
+    if (mid) {
+        (*env)->CallStaticVoidMethod(env, cls, mid);
+    } else {
+        LOGE("jni_start_update_check: startUpdateCheck method not found");
+    }
+
+    (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, activity);
+}
+
+/*
+ * Called from filepicker.c when the user taps "UPDATE" in the update popup.
+ * Asks Java to download the APK to the cache dir and launch the system installer.
+ */
+void jni_download_and_install_apk(const char *url)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    if (!env || !url || !url[0]) return;
+
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!activity) return;
+
+    jclass cls = (*env)->GetObjectClass(env, activity);
+    if (!cls) { (*env)->DeleteLocalRef(env, activity); return; }
+
+    jmethodID mid = (*env)->GetStaticMethodID(env, cls, "downloadAndInstallApk", "(Ljava/lang/String;)V");
+    if (mid) {
+        jstring jurl = (*env)->NewStringUTF(env, url);
+        if (jurl) {
+            (*env)->CallStaticVoidMethod(env, cls, mid, jurl);
+            (*env)->DeleteLocalRef(env, jurl);
+        }
+    } else {
+        LOGE("jni_download_and_install_apk: downloadAndInstallApk method not found");
+    }
+
+    (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, activity);
+}
+
+/*
+ * Called from updater.c or the SDL main thread to open a URL in the browser.
+ */
+void jni_open_url(const char *url)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    if (!env || !url || !url[0]) return;
+
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!activity) return;
+
+    jclass cls = (*env)->GetObjectClass(env, activity);
+    if (!cls) { (*env)->DeleteLocalRef(env, activity); return; }
+
+    jmethodID mid = (*env)->GetStaticMethodID(env, cls, "openUrl", "(Ljava/lang/String;)V");
+    if (mid) {
+        jstring jurl = (*env)->NewStringUTF(env, url);
+        if (jurl) {
+            (*env)->CallStaticVoidMethod(env, cls, mid, jurl);
+            (*env)->DeleteLocalRef(env, jurl);
+        }
+    } else {
+        LOGE("jni_open_url: openUrl method not found");
+    }
+
+    (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, activity);
+}
+
+/*
+ * JNI export: called from Java background thread when a newer release is confirmed.
+ * Stores the result in updater.c state and posts the update dialog to the UI thread.
+ */
+JNIEXPORT void JNICALL
+Java_com_emu7800_android_EMU7800Activity_nativeUpdateResult(
+    JNIEnv *env, jclass cls, jstring jversion, jstring jnote, jstring jurl)
+{
+    (void)cls;
+
+    const char *version = (*env)->GetStringUTFChars(env, jversion, NULL);
+    const char *note    = jnote ? (*env)->GetStringUTFChars(env, jnote, NULL) : "";
+    const char *url     = jurl  ? (*env)->GetStringUTFChars(env, jurl,  NULL) : "";
+
+    LOGI("nativeUpdateResult: version=%s", version ? version : "(null)");
+
+    if (version && version[0]) {
+        updater_set_result(version, note, url);
+        /* UI is driven by the C filepicker — no Java dialog needed */
+    }
+
+    if (version) (*env)->ReleaseStringUTFChars(env, jversion, version);
+    if (note && jnote) (*env)->ReleaseStringUTFChars(env, jnote, note);
+    if (url  && jurl)  (*env)->ReleaseStringUTFChars(env, jurl,  url);
 }

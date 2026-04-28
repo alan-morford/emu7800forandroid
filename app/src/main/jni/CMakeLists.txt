@@ -33,6 +33,9 @@ set(PLATFORM_SRCS
     src/platform/filepicker.c
     src/platform/jni_bridge.c
     src/platform/log_android.c
+    src/platform/puff.c
+    src/platform/zip_load.c
+    src/platform/updater.c
 )
 
 add_library(main SHARED ${CORE_SRCS} ${PLATFORM_SRCS})

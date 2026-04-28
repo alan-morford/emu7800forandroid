@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>    /* strcasecmp */
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
@@ -30,6 +31,8 @@
 #include "input.h"
 #include "font.h"
 #include "filepicker.h"
+#include "zip_load.h"
+#include "updater.h"
 
 extern void log_msg(const char *msg);
 
@@ -160,7 +163,31 @@ static void launch_selected_rom(void)
     machine_shutdown();
     machine_init();
 
-    int rc = machine_load_rom(path, mtype);
+    /* ZIP path: extract ROM data from the archive, then load from memory. */
+    int rc;
+    size_t plen = strlen(path);
+    if (plen >= 4 && strcasecmp(path + plen - 4, ".zip") == 0) {
+        unsigned char *rom_data = NULL;
+        unsigned long  rom_size = 0;
+        int actual_mtype        = mtype;
+        if (zip_extract_rom(path, &rom_data, &rom_size, &actual_mtype) != 0) {
+            log_msg("launch_selected_rom: zip_extract_rom failed");
+            filepicker_show_notfound();
+            return;
+        }
+        rc = machine_load_rom_data(rom_data, (long)rom_size, actual_mtype);
+        free(rom_data);
+        if (rc == 0) {
+            snprintf(msg, sizeof(msg),
+                "===== ROM LOADED (ZIP): %s (%s) =====",
+                path, actual_mtype == MACHINE_2600 ? "2600" : "7800");
+            log_msg(msg);
+        }
+        mtype = actual_mtype;
+    } else {
+        rc = machine_load_rom(path, mtype);
+    }
+
     if (rc != 0) {
         log_msg("launch_selected_rom: machine_load_rom failed");
         filepicker_show_notfound();
@@ -176,8 +203,8 @@ static void launch_selected_rom(void)
 
     g_pending_mtype = mtype;
 
-    audio_pause(1);
-    audio_pause(0);
+    audio_pause(1);   /* ensure paused while flushing stale samples */
+    audio_flush();
 
     input_init();
     input_set_save_exists(savestate_exists(g_current_rom_path));
@@ -194,6 +221,14 @@ static void launch_selected_rom(void)
     if (pthread_create(&g_emu_thread, NULL, emulator_thread_func, NULL) == 0) {
         g_emu_thread_created = 1;
         log_msg("launch_selected_rom: emulator thread started");
+        /* Wait for the first frame before unpausing audio so the ring buffer
+         * has valid samples — prevents the startup pop/click. */
+        {
+            uint64_t deadline = get_time_us() + 200000ULL;
+            while (!g_frame_ready && get_time_us() < deadline)
+                usleep(2000);
+        }
+        audio_pause(0);
     } else {
         log_msg("launch_selected_rom: pthread_create failed");
         g_emulator_running = 0;
@@ -276,6 +311,8 @@ int SDL_main(int argc, char *argv[])
     /* filepicker_set_data_dir() was called earlier by jni_bridge.c via
      * nativeSetDataDir(). filepicker_init() loads persistence from that dir. */
     filepicker_init();
+
+    updater_check_start();
 
     g_running   = 1;
     g_app_state = APP_STATE_FILEPICKER;
@@ -544,7 +581,7 @@ void app_load_rom(const char *path, int machine_type)
     g_pending_mtype = machine_type;
 
     audio_pause(1);
-    audio_pause(0);
+    audio_flush();
 
     input_init();
 
@@ -556,6 +593,12 @@ void app_load_rom(const char *path, int machine_type)
     if (pthread_create(&g_emu_thread, NULL, emulator_thread_func, NULL) == 0) {
         g_emu_thread_created = 1;
         log_msg("app_load_rom: emulator thread started");
+        {
+            uint64_t deadline = get_time_us() + 200000ULL;
+            while (!g_frame_ready && get_time_us() < deadline)
+                usleep(2000);
+        }
+        audio_pause(0);
     } else {
         log_msg("app_load_rom: pthread_create failed");
         g_emulator_running = 0;

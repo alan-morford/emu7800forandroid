@@ -25,6 +25,9 @@ void machine_shutdown(void);
 /* Load a ROM file */
 int machine_load_rom(const char *path, int machine_type);
 
+/* Load a ROM from an already-read data buffer (used by ZIP loader) */
+int machine_load_rom_data(const uint8_t *data, long size, int machine_type);
+
 /* Check if a ROM is loaded */
 int machine_is_loaded(void);
 

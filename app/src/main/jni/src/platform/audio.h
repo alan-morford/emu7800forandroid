@@ -22,6 +22,10 @@ void audio_update(void);
 /* Pause (pause=1) or resume (pause=0) audio output. */
 void audio_pause(int pause);
 
+/* Discard all buffered samples.  Call while audio is paused and the emulator
+ * thread is stopped (e.g. between ROM loads). */
+void audio_flush(void);
+
 /* Return the actual sample rate negotiated by SDL. */
 int audio_get_sample_rate(void);
 

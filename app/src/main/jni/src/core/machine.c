@@ -448,69 +448,62 @@ void machine_shutdown(void)
     g_rom_loaded = 0;
 }
 
+/* Load ROM from a data buffer — shared by machine_load_rom and ZIP loader */
+int machine_load_rom_data(const uint8_t *data, long size, int machine_type)
+{
+    if (size <= 0 || size > 512 * 1024) return -2;
+
+    g_machine_type = machine_type;
+
+    if (cart_load(&g_cart, data, (int)size, machine_type) != 0)
+        return -5;
+
+    machine_reset();
+    g_rom_loaded = 1;
+
+    pia_reset_log_counts();
+    cart_reset_log_counts();
+    tia_reset_sync_log();
+
+    return 0;
+}
+
 /* Load a ROM file */
 int machine_load_rom(const char *path, int machine_type)
 {
     FILE *f;
     uint8_t *data;
     long size;
+    int rc;
 
     f = fopen(path, "rb");
-    if (!f) {
-        return -1;
-    }
+    if (!f) return -1;
 
     fseek(f, 0, SEEK_END);
     size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    if (size <= 0 || size > 512 * 1024) {
-        fclose(f);
-        return -2;
-    }
+    if (size <= 0 || size > 512 * 1024) { fclose(f); return -2; }
 
     data = (uint8_t *)malloc(size);
-    if (!data) {
-        fclose(f);
-        return -3;
-    }
+    if (!data) { fclose(f); return -3; }
 
     if (fread(data, 1, size, f) != (size_t)size) {
-        free(data);
-        fclose(f);
-        return -4;
+        free(data); fclose(f); return -4;
     }
     fclose(f);
 
-    /* Set machine type */
-    g_machine_type = machine_type;
-
-    /* Load cart */
-    if (cart_load(&g_cart, data, (int)size, machine_type) != 0) {
-        free(data);
-        return -5;
-    }
-
+    rc = machine_load_rom_data(data, size, machine_type);
     free(data);
 
-    /* Reset everything */
-    machine_reset();
-    g_rom_loaded = 1;
-
-    /* Reset diagnostic log counters for the new ROM */
-    pia_reset_log_counts();
-    cart_reset_log_counts();
-    tia_reset_sync_log();
-
-    {
+    if (rc == 0) {
         char msg[256];
         snprintf(msg, sizeof(msg),
             "===== ROM LOADED: %s (%s) =====",
             path, machine_type == MACHINE_2600 ? "2600" : "7800");
         log_msg(msg);
     }
-
-    return 0;
+    return rc;
 }
 
 /* Check if a ROM is loaded */
