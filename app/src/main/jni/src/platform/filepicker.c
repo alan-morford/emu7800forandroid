@@ -134,7 +134,9 @@ static int  g_notfound_recent_idx     = -1;
 static int  g_dirpicker_popup_visible   = 0;
 static int  g_about_popup_visible       = 0;
 static int  g_autosave_warn_visible     = 0;
-static int  g_update_popup_visible      = 0;
+static int   g_update_popup_visible      = 0;
+static float g_update_popup_scroll      = 0.0f;
+static int   g_update_popup_nlines      = 0;  /* total wrapped lines, set each draw */
 
 /* Directory picker */
 static DirEntry g_dirpicker_dirs[DIRPICKER_MAX];
@@ -1404,6 +1406,40 @@ static void draw_about_popup(SDL_Renderer *r, const FPLayout *L)
     SDL_RenderSetClipRect(r, NULL);
 }
 
+/* Strip leading markdown header markers (#, ##, etc.) and bullet markers (-, *)
+ * plus any leading/trailing whitespace from a single line in-place. */
+static const char *strip_md(const char *line)
+{
+    while (*line == '#' || *line == '*' || *line == '-' || *line == ' ' || *line == '\r')
+        line++;
+    return line;
+}
+
+/* Word-wrap a single stripped line into out[], returning number of sub-lines added.
+ * max_chars is the max characters per line for the bitmap font at this scale. */
+static int wrap_line(const char *text, int max_chars, char out[][128], int max_out, int *n)
+{
+    int added = 0;
+    while (*text && *n < max_out) {
+        int remaining = (int)strlen(text);
+        if (remaining <= max_chars) {
+            strncpy(out[*n], text, 127); out[(*n)++][127] = '\0';
+            added++;
+            break;
+        }
+        int cut = max_chars;
+        for (int i = max_chars - 1; i > 0; i--) {
+            if (text[i] == ' ') { cut = i; break; }
+        }
+        int copy = cut < 127 ? cut : 127;
+        strncpy(out[*n], text, copy); out[*n][copy] = '\0';
+        (*n)++; added++;
+        text += cut;
+        while (*text == ' ') text++;
+    }
+    return added;
+}
+
 static void draw_update_popup(SDL_Renderer *r, const FPLayout *L)
 {
     const char *version = updater_get_version();
@@ -1413,37 +1449,50 @@ static void draw_update_popup(SDL_Renderer *r, const FPLayout *L)
     int title_h = 10 * L->title_scale + 8;
     int line_h  = 8 * L->font_scale + 6;
 
-    /* Build lines: version line + up to 6 note lines split on \n */
-    char lines[7][128];
+    /* Popup width — compute before wrapping so we know max_chars */
+    int pw = fp_popup_w(FP_WIDE_W_DP, L->sw);
+    if (pw > L->sw * 9 / 10) pw = L->sw * 9 / 10;
+    int char_w   = 8 * L->font_scale;
+    int max_chars = (pw - 28) / (char_w > 0 ? char_w : 1);
+    if (max_chars < 8) max_chars = 8;
+
+    /* Build all display lines: version line + stripped/wrapped note lines */
+    char lines[32][128];
     int nlines = 0;
     {
         char ver_line[80];
         snprintf(ver_line, sizeof(ver_line), "Version %s is available", version);
-        strncpy(lines[nlines], ver_line, 127);
-        lines[nlines++][127] = '\0';
+        wrap_line(ver_line, max_chars, lines, 32, &nlines);
     }
     if (note && note[0]) {
-        char tmp[512];
-        strncpy(tmp, note, 511); tmp[511] = '\0';
+        char tmp[1024];
+        strncpy(tmp, note, 1023); tmp[1023] = '\0';
         char *p = tmp;
-        while (nlines < 7 && p && *p) {
+        while (p && *p && nlines < 32) {
             char *nl = strchr(p, '\n');
             if (nl) *nl = '\0';
-            strncpy(lines[nlines], p, 127);
-            lines[nlines++][127] = '\0';
+            const char *stripped = strip_md(p);
+            if (*stripped)
+                wrap_line(stripped, max_chars, lines, 32, &nlines);
             p = nl ? nl + 1 : NULL;
         }
     }
+    g_update_popup_nlines = nlines;
 
-    int pw = fp_popup_w(FP_WIDE_W_DP, L->sw);
-    for (int i = 0; i < nlines; i++) {
-        int lw = font_string_width(lines[i], L->font_scale) + 28;
-        if (lw > pw) pw = lw;
-    }
-    if (pw > L->sw * 9 / 10) pw = L->sw * 9 / 10;
+    /* Popup height: cap at 88% of screen, allow scroll for overflow */
+    int max_ph   = L->sh * 88 / 100;
+    int ideal_ph = title_h + 8 + nlines * line_h + 16 + btn_h + 8;
+    int ph       = ideal_ph < max_ph ? ideal_ph : max_ph;
+    int content_h = ph - title_h - 8 - btn_h - 16;
+    if (content_h < 0) content_h = 0;
+    int visible_lines = content_h / line_h;
 
-    int ph = title_h + 8 + nlines * line_h + 16 + btn_h + 8;
-    if (ph > L->sh * 9 / 10) ph = L->sh * 9 / 10;
+    /* Clamp scroll */
+    float max_scroll = (float)(nlines - visible_lines);
+    if (max_scroll < 0) max_scroll = 0;
+    if (g_update_popup_scroll > max_scroll) g_update_popup_scroll = max_scroll;
+    if (g_update_popup_scroll < 0)          g_update_popup_scroll = 0;
+
     int px = (L->sw - pw) / 2;
     int py = (L->sh - ph) / 2;
     fp_popup_bg(r, px, py, pw, ph);
@@ -1452,23 +1501,39 @@ static void draw_update_popup(SDL_Renderer *r, const FPLayout *L)
     SDL_SetRenderDrawColor(r, 180, 120, 0, 200);
     SDL_RenderDrawLine(r, px + 4, py + title_h, px + pw - 4, py + title_h);
 
-    int ty = py + title_h + 8;
-    SDL_Rect clip = {px + 4, py + title_h + 2, pw - 8, ph - title_h - btn_h - 20};
+    /* Content clip rect */
+    int clip_top = py + title_h + 4;
+    SDL_Rect clip = {px + 4, clip_top, pw - 8, content_h + line_h};
     SDL_RenderSetClipRect(r, &clip);
-    for (int i = 0; i < nlines; i++) {
+
+    int start = (int)g_update_popup_scroll;
+    int ty    = clip_top - (int)((g_update_popup_scroll - start) * line_h);
+    for (int i = start; i < nlines && ty < clip_top + content_h + line_h; i++) {
         if (lines[i][0]) {
-            Uint8 cr = (i == 0) ? 255 : 220;
-            Uint8 cg = (i == 0) ? 200 : 220;
-            Uint8 cb = (i == 0) ?  80 : 220;
+            Uint8 cr = (i == 0) ? 220 : 200;
+            Uint8 cg = (i == 0) ? 180 : 200;
+            Uint8 cb = (i == 0) ?  60 : 200;
             font_draw_string(r, lines[i], px + 12, ty, L->font_scale, cr, cg, cb);
         }
         ty += line_h;
     }
     SDL_RenderSetClipRect(r, NULL);
 
+    /* Thin scrollbar when content overflows */
+    if (nlines > visible_lines && visible_lines > 0) {
+        int sb_x  = px + pw - 5;
+        int sb_h  = content_h;
+        int sb_y  = clip_top;
+        int th_h  = sb_h * visible_lines / nlines;
+        if (th_h < 8) th_h = 8;
+        int th_y  = sb_y + (int)((sb_h - th_h) * g_update_popup_scroll / max_scroll);
+        fp_fill_rect(r, sb_x, sb_y, 3, sb_h, 60, 60, 60, 180);
+        fp_fill_rect(r, sb_x, th_y, 3, th_h, 180, 100, 0, 220);
+    }
+
     /* Two buttons at bottom: UPDATE (left) and LATER (right) */
-    int bw = (pw - 24) / 2;
-    int by = py + ph - btn_h - 8;
+    int bw     = (pw - 24) / 2;
+    int by     = py + ph - btn_h - 8;
     int bx_upd = px + 8;
     int bx_lat = px + pw - bw - 8;
 
@@ -1561,7 +1626,7 @@ void filepicker_draw(SDL_Renderer *r)
         int upd_w = font_string_width("UPDATE", L.font_scale);
         int upd_x = L.gear_x - upd_w - 10;
         int upd_y = L.gear_y + (L.gear_w - 8 * L.font_scale) / 2;
-        font_draw_string(r, "UPDATE", upd_x, upd_y, L.font_scale, 255, 80, 0);
+        font_draw_string(r, "UPDATE", upd_x, upd_y, L.font_scale, 200, 100, 0);
     }
 
     /* Gear icon (top-right of top bar) */
@@ -1758,6 +1823,10 @@ void filepicker_touch_down(int x, int y)
         g_scroll_mode     = 2;
         g_scroll_at_touch = g_recent_scroll;
         g_touch_active    = 1;
+    } else if (g_update_popup_visible) {
+        g_scroll_mode     = 3;
+        g_scroll_at_touch = g_update_popup_scroll;
+        g_touch_active    = 1;
     } else if (any_popup_visible()) {
         return;  /* other popups: modal, no scroll */
     } else {
@@ -1810,6 +1879,24 @@ void filepicker_touch_move(int x, int y)
             if (new_s < 0) new_s = 0;
             if (new_s > max_s) new_s = max_s;
             g_recent_scroll = new_s;
+        } else if (g_scroll_mode == 3) {
+            /* Update popup: mirrors draw_update_popup geometry */
+            int title_h    = 10 * L.title_scale + 8;
+            int btn_h      = L.resume_h;
+            int line_h     = 8 * L.font_scale + 6;
+            int pw         = fp_popup_w(FP_WIDE_W_DP, L.sw);
+            if (pw > L.sw * 9 / 10) pw = L.sw * 9 / 10;
+            int max_ph     = L.sh * 88 / 100;
+            int ideal_ph   = title_h + 8 + g_update_popup_nlines * line_h + 16 + btn_h + 8;
+            int ph         = ideal_ph < max_ph ? ideal_ph : max_ph;
+            int content_h  = ph - title_h - 8 - btn_h - 16;
+            if (content_h < 0) content_h = 0;
+            int visible    = content_h / (line_h > 0 ? line_h : 1);
+            float max_s    = (float)(g_update_popup_nlines - visible);
+            if (max_s < 0) max_s = 0;
+            if (new_s < 0) new_s = 0;
+            if (new_s > max_s) new_s = max_s;
+            g_update_popup_scroll = new_s;
         } else {
             /* Main file list */
             int hb    = (g_file_count > 0 && strcmp(g_files[0].name, "..") == 0);
@@ -2171,14 +2258,15 @@ int filepicker_touch_up(int x, int y)
             else if (apk_url[0])
                 jni_open_url(apk_url);
         }
-        /* LATER button */
+        /* LATER button — close popup but keep label flashing */
         else if (!g_touch_moved && x >= bx_lat && x < bx_lat + bw && y >= by && y < by + btn_h) {
-            updater_dismiss();
             g_update_popup_visible = 0;
+            g_update_popup_scroll  = 0.0f;
         }
         /* Tap outside → close */
         else if (x < px || x > px + pw || y < py || y > py + ph) {
             g_update_popup_visible = 0;
+            g_update_popup_scroll  = 0.0f;
         }
         g_touch_active = 0;
         return 0;
@@ -2341,6 +2429,7 @@ int filepicker_touch_up(int x, int y)
             if (x >= upd_tx - 4 && x <= upd_tx + upd_tw + 4 &&
                 y >= upd_ty - 4 && y <= upd_ty + 8 * L.font_scale + 4) {
                 g_update_popup_visible = 1;
+                g_update_popup_scroll  = 0.0f;
                 g_touch_active = 0;
                 return 0;
             }

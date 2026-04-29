@@ -17,6 +17,10 @@
 package com.emu7800.android;
 
 import android.app.AlertDialog;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.content.Intent;
@@ -47,10 +51,6 @@ import org.json.JSONObject;
 import org.libsdl.app.SDLActivity;
 
 import java.io.BufferedReader;
-import java.io.FileOutputStream;
-import java.io.FileInputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -700,7 +700,7 @@ public class EMU7800Activity extends SDLActivity {
 
                 if (!remoteVer.isEmpty() && isNewerVersion(localVer, remoteVer)) {
                     /* Truncate long release notes for the popup */
-                    if (body.length() > 400) body = body.substring(0, 400) + "...";
+                    if (body.length() > 800) body = body.substring(0, 800) + "...";
                     nativeUpdateResult(remoteVer, body, apkUrl);
                 }
             } catch (Exception e) {
@@ -729,78 +729,54 @@ public class EMU7800Activity extends SDLActivity {
 
     /**
      * Called from filepicker.c (via jni_bridge.c) when the user taps "UPDATE"
-     * in the in-app update popup.  Downloads the APK on a background thread
-     * and launches the system package installer on completion.
-     * On Android 7+ uses PackageInstaller to avoid FileUriExposedException;
-     * on Android 5-6 uses a file:// URI directly.
+     * in the in-app update popup.  Uses DownloadManager so the system provides
+     * a content:// URI — no FileProvider needed and no FileUriExposedException.
      */
     public static void downloadAndInstallApk(final String url) {
         EMU7800Activity a = sInstance;
         if (a == null || url == null || url.isEmpty()) return;
         Log.i(TAG, "downloadAndInstallApk: " + url);
-        new Thread(() -> {
-            java.io.File outFile = new java.io.File(a.getCacheDir(), "emu7800_update.apk");
+        a.runOnUiThread(() -> {
             try {
-                URL apkUrl = new URL(url);
-                HttpURLConnection conn = (HttpURLConnection) apkUrl.openConnection();
-                conn.setConnectTimeout(30000);
-                conn.setReadTimeout(60000);
-                conn.connect();
-                if (conn.getResponseCode() != 200) {
-                    Log.w(TAG, "downloadAndInstallApk: HTTP " + conn.getResponseCode());
-                    return;
-                }
-                try (InputStream in = conn.getInputStream();
-                     OutputStream out = new FileOutputStream(outFile)) {
-                    byte[] buf = new byte[65536];
-                    int n;
-                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-                }
-                Log.i(TAG, "downloadAndInstallApk: downloaded " + outFile.length() + " bytes");
-            } catch (Exception e) {
-                Log.w(TAG, "downloadAndInstallApk: download failed: " + e.getMessage());
-                return;
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                /* Android 7+: use PackageInstaller.Session to avoid FileUriExposedException */
-                try {
-                    android.content.pm.PackageInstaller installer =
-                            a.getPackageManager().getPackageInstaller();
-                    android.content.pm.PackageInstaller.SessionParams params =
-                            new android.content.pm.PackageInstaller.SessionParams(
-                                    android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-                    int sessionId = installer.createSession(params);
-                    android.content.pm.PackageInstaller.Session session = installer.openSession(sessionId);
-                    try (InputStream in = new FileInputStream(outFile);
-                         OutputStream out = session.openWrite(outFile.getName(), 0, outFile.length())) {
-                        byte[] buf = new byte[65536];
-                        int n;
-                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-                        session.fsync(out);
+                DownloadManager dm = (DownloadManager) a.getSystemService(Context.DOWNLOAD_SERVICE);
+                DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url))
+                        .setTitle("EMU7800 Update")
+                        .setDescription("Downloading update...")
+                        .setNotificationVisibility(
+                                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        .setMimeType("application/vnd.android.package-archive")
+                        .setDestinationInExternalPublicDir(
+                                Environment.DIRECTORY_DOWNLOADS, "EMU7800-update.apk");
+                final long downloadId = dm.enqueue(req);
+                final BroadcastReceiver[] holder = {null};
+                holder[0] = new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context ctx, Intent intent) {
+                        long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+                        if (id != downloadId) return;
+                        a.unregisterReceiver(holder[0]);
+                        Uri apkUri = dm.getUriForDownloadedFile(id);
+                        if (apkUri == null) {
+                            Log.e(TAG, "downloadAndInstallApk: no URI for download");
+                            return;
+                        }
+                        Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE)
+                                .setDataAndType(apkUri,
+                                        "application/vnd.android.package-archive")
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        try { a.startActivity(install); }
+                        catch (Exception e) {
+                            Log.e(TAG, "downloadAndInstallApk: install failed: " + e.getMessage());
+                        }
                     }
-                    android.content.Intent resultIntent = new android.content.Intent(a, EMU7800Activity.class);
-                    int piFlags = android.app.PendingIntent.FLAG_UPDATE_CURRENT;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                        piFlags |= android.app.PendingIntent.FLAG_MUTABLE;
-                    android.app.PendingIntent pi =
-                            android.app.PendingIntent.getActivity(a, 0, resultIntent, piFlags);
-                    session.commit(pi.getIntentSender());
-                    session.close();
-                } catch (Exception e) {
-                    Log.e(TAG, "downloadAndInstallApk: PackageInstaller failed: " + e.getMessage());
-                }
-            } else {
-                /* Android 5-6: file:// URI accepted by installer */
-                final Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(Uri.fromFile(outFile),
-                        "application/vnd.android.package-archive");
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                a.runOnUiThread(() -> {
-                    try { a.startActivity(intent); }
-                    catch (Exception e) { Log.e(TAG, "downloadAndInstallApk: " + e.getMessage()); }
-                });
+                };
+                a.registerReceiver(holder[0],
+                        new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+            } catch (Exception e) {
+                Log.w(TAG, "downloadAndInstallApk: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     /** Opens a URL in the device's default browser. */
