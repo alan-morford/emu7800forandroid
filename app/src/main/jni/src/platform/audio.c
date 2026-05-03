@@ -35,16 +35,18 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
 {
     int16_t *out = (int16_t *)stream;
     int n = len / (int)sizeof(int16_t);
+    static int16_t last = 0;
     (void)userdata;
 
     for (int i = 0; i < n; i++) {
         int r = g_ring_read;
-        int w = g_ring_write;
+        int w = __atomic_load_n(&g_ring_write, __ATOMIC_ACQUIRE);
         if (r != w) {
-            out[i] = g_ring[r];
+            last = g_ring[r];
+            out[i] = last;
             g_ring_read = (r + 1) & RING_MASK;
         } else {
-            out[i] = 0;  /* underrun — output silence */
+            out[i] = last;  /* underrun — hold last sample to avoid click */
         }
     }
 }
@@ -101,7 +103,7 @@ void audio_update(void)
         int next = (g_ring_write + 1) & RING_MASK;
         if (next != read_pos) {
             g_ring[g_ring_write] = buf[i];
-            g_ring_write = next;
+            __atomic_store_n(&g_ring_write, next, __ATOMIC_RELEASE);
         }
         /* Buffer full: drop samples silently to keep timing stable. */
     }

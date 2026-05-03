@@ -11,8 +11,8 @@ android {
         applicationId "com.emu7800.android"
         minSdk 21
         targetSdk 34
-        versionCode 3
-        versionName "1.1.1"
+        versionCode 5
+        versionName "1.2.0"
 
         externalNativeBuild {
             cmake {

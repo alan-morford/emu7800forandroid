@@ -198,13 +198,9 @@ static int compare_files(const void *a, const void *b)
 {
     const FileEntry *fa = (const FileEntry *)a;
     const FileEntry *fb = (const FileEntry *)b;
-    /* Directories before files */
+    /* Directories before files, then pure alphabetical */
     if (fa->is_dir != fb->is_dir)
         return fb->is_dir - fa->is_dir;
-    /* ROM files before non-ROM files */
-    int a_rom = is_rom_type(fa->type);
-    int b_rom = is_rom_type(fb->type);
-    if (a_rom != b_rom) return b_rom - a_rom;
     return strcasecmp(fa->name, fb->name);
 }
 
@@ -1497,7 +1493,7 @@ static void draw_update_popup(SDL_Renderer *r, const FPLayout *L)
     int py = (L->sh - ph) / 2;
     fp_popup_bg(r, px, py, pw, ph);
 
-    font_draw_string(r, "UPDATE AVAILABLE", px + 12, py + 8, L->title_scale, 200, 100, 0);
+    font_draw_string(r, "UPDATE", px + 12, py + 8, L->title_scale, 200, 100, 0);
     SDL_SetRenderDrawColor(r, 180, 120, 0, 200);
     SDL_RenderDrawLine(r, px + 4, py + title_h, px + pw - 4, py + title_h);
 
@@ -1702,9 +1698,13 @@ void filepicker_draw(SDL_Renderer *r)
                 }
                 display[sizeof(display) - 1] = '\0';
 
-                /* Color: ROMs white, dirs orange, .sav purple */
+                /* Color: ROMs white, zips blue, dirs orange, .sav purple */
                 Uint8 tr, tg, tb;
-                if (is_rom_type(fe->type)) {
+                const char *fe_dot = strrchr(fe->name, '.');
+                int fe_is_zip = (fe_dot && strcasecmp(fe_dot, ".zip") == 0);
+                if (fe_is_zip) {
+                    tr =  80; tg = 160; tb = 255;
+                } else if (is_rom_type(fe->type)) {
                     tr = 255; tg = 255; tb = 255;
                 } else if (fe->type == ENTRY_SAV) {
                     tr = 180; tg =  80; tb = 220;
@@ -2225,24 +2225,15 @@ int filepicker_touch_up(int x, int y)
     }
 
     if (g_update_popup_visible) {
-        /* Mirror draw_update_popup geometry */
-        int btn_h   = L.resume_h;
-        int title_h = 10 * L.title_scale + 8;
-        int line_h  = 8 * L.font_scale + 6;
-        const char *note = updater_get_note();
-        int nlines = 1;  /* version line */
-        if (note && note[0]) {
-            const char *p = note;
-            while (nlines < 7 && p && *p) {
-                const char *nl = strchr(p, '\n');
-                nlines++;
-                p = nl ? nl + 1 : NULL;
-            }
-        }
+        /* Mirror draw_update_popup geometry exactly */
+        int btn_h    = L.resume_h;
+        int title_h  = 10 * L.title_scale + 8;
+        int line_h   = 8 * L.font_scale + 6;
         int pw = fp_popup_w(FP_WIDE_W_DP, L.sw);
         if (pw > L.sw * 9 / 10) pw = L.sw * 9 / 10;
-        int ph = title_h + 8 + nlines * line_h + 16 + btn_h + 8;
-        if (ph > L.sh * 9 / 10) ph = L.sh * 9 / 10;
+        int ideal_ph = title_h + 8 + g_update_popup_nlines * line_h + 16 + btn_h + 8;
+        int max_ph   = L.sh * 88 / 100;
+        int ph       = ideal_ph < max_ph ? ideal_ph : max_ph;
         int px = (L.sw - pw) / 2;
         int py = (L.sh - ph) / 2;
         int bw = (pw - 24) / 2;

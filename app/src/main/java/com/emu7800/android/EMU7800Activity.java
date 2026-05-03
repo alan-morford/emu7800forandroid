@@ -771,8 +771,15 @@ public class EMU7800Activity extends SDLActivity {
                         }
                     }
                 };
-                a.registerReceiver(holder[0],
-                        new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+                // Android 14+ (API 34) requires RECEIVER_EXPORTED for system broadcasts
+                if (Build.VERSION.SDK_INT >= 34) {
+                    a.registerReceiver(holder[0],
+                            new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                            Context.RECEIVER_EXPORTED);
+                } else {
+                    a.registerReceiver(holder[0],
+                            new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+                }
             } catch (Exception e) {
                 Log.w(TAG, "downloadAndInstallApk: " + e.getMessage());
             }
