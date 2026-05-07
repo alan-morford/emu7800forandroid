@@ -97,12 +97,14 @@ static volatile uint8_t g_joystick[2];  /* Bit 0=up, 1=down, 2=left, 3=right */
 static volatile uint8_t g_trigger[2];   /* Primary fire button */
 static volatile uint8_t g_trigger2[2];  /* Secondary fire button (7800) */
 static volatile uint8_t g_switches;     /* Bit 0=reset, 1=select, 2=ldiff, 3=rdiff */
+static volatile uint8_t g_paddle[2];    /* Paddle positions 0-255 */
 
 /* Frame-sampled copies — stable for the duration of one frame */
 static uint8_t g_frame_joystick[2];
 static uint8_t g_frame_trigger_m[2];   /* _m suffix to avoid clash with tia.c g_frame_trigger */
 static uint8_t g_frame_trigger2_m[2];
 static uint8_t g_frame_switches;
+static uint8_t g_frame_paddle[2];
 
 /* Forward declarations */
 static uint8_t mem_read_2600(uint16_t addr);
@@ -423,6 +425,7 @@ void machine_init(void)
     g_trigger2[0] = 0;
     g_trigger2[1] = 0;
     g_switches = 0;
+    g_paddle[0] = g_paddle[1] = 127;
 
     m6502_init(&g_cpu, 1);
     tia_init(&g_tia);
@@ -497,6 +500,7 @@ int machine_load_rom(const char *path, int machine_type)
     free(data);
 
     if (rc == 0) {
+        machine_detect_paddle(path);
         char msg[256];
         snprintf(msg, sizeof(msg),
             "===== ROM LOADED: %s (%s) =====",
@@ -797,6 +801,10 @@ void machine_sample_input(void)
     g_frame_trigger2_m[0] = g_trigger2[0];
     g_frame_trigger2_m[1] = g_trigger2[1];
     g_frame_switches = g_switches;
+    g_frame_paddle[0] = g_paddle[0];
+    g_frame_paddle[1] = g_paddle[1];
+    tia_set_paddle(0, g_frame_paddle[0]);
+    tia_set_paddle(1, g_frame_paddle[1]);
 }
 
 /* All sampling functions return frame-sampled copies (stable within a frame) */
@@ -859,6 +867,57 @@ void machine_set_switch(int sw, int pressed)
         g_switches |= (1 << sw);
     } else {
         g_switches &= ~(1 << sw);
+    }
+}
+
+void machine_set_paddle(int player, int val)
+{
+    if (player < 0 || player > 1) return;
+    if (val < 0)   val = 0;
+    if (val > 255) val = 255;
+    g_paddle[player] = (uint8_t)val;
+}
+
+static int paddle_name_match(const char *path)
+{
+    static const char *keywords[] = {
+        "breakout", "circus", "warlords", "kaboom",
+        "night driver", "nightdrvr", "video olymp",
+        "demons to", "steeple", "street racer",
+        "canyon bomb", "encounter at l",
+        NULL
+    };
+    const char *base = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    char lower[256];
+    int i;
+    for (i = 0; i < 255 && base[i]; i++) {
+        char c = base[i];
+        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    lower[i] = '\0';
+    for (i = 0; keywords[i]; i++) {
+        const char *kw = keywords[i];
+        int klen = 0;
+        while (kw[klen]) klen++;
+        for (int j = 0; lower[j]; j++) {
+            int match = 1;
+            for (int k = 0; k < klen; k++) {
+                if (lower[j + k] != kw[k]) { match = 0; break; }
+            }
+            if (match) return 1;
+        }
+    }
+    return 0;
+}
+
+void machine_detect_paddle(const char *path)
+{
+    if (!path || g_machine_type != MACHINE_2600) return;
+    if (paddle_name_match(path)) {
+        g_cart.left_controller = CTRL_PADDLE;
+        log_msg("machine_detect_paddle: paddle controller detected");
     }
 }
 

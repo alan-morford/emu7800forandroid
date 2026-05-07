@@ -63,6 +63,10 @@ void machine_set_joystick(int player, int direction, int pressed);
 void machine_set_trigger(int player, int pressed);   /* Primary fire button */
 void machine_set_trigger2(int player, int pressed);  /* Secondary fire button (7800) */
 void machine_set_switch(int sw, int pressed);
+void machine_set_paddle(int player, int val);        /* Paddle position 0-255 (0=left, 255=right) */
+
+/* Detect paddle controller from ROM filename and set left_controller accordingly. */
+void machine_detect_paddle(const char *path);
 
 /* Clear all input */
 void machine_clear_input(void);

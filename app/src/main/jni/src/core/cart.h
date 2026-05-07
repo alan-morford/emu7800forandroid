@@ -16,6 +16,7 @@
 #define CTRL_NONE              0
 #define CTRL_PROLINE_JOYSTICK  1
 #define CTRL_LIGHTGUN          2
+#define CTRL_PADDLE            3
 
 /* Cart types */
 typedef enum {

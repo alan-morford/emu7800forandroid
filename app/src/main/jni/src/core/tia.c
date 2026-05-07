@@ -193,6 +193,7 @@ static uint8_t *g_display_buffer = g_frame_buffers[1];
 /* Sampled input state — captured once at frame start */
 static int g_frame_trigger[2];
 static int g_inpt4_log_count = 0;
+static int g_tia_paddle[4] = {127, 127, 127, 127}; /* INPT0-3 paddle positions 0-255 */
 
 /* Frame start TIA clock — for mid-frame audio position */
 static uint64_t g_frame_start_tia_clock = 0;
@@ -1113,18 +1114,21 @@ uint8_t tia_read(TIA *tia, uint16_t addr, uint64_t cpu_clock, uint8_t data_bus_s
         case INPT0:
         case INPT1:
         case INPT2:
-        case INPT3:
+        case INPT3: {
             if (tia->dump_enabled) {
                 retval = 0x00;
             } else {
+                int pidx = (int)addr - (int)INPT0;  /* 0-3 */
+                uint64_t threshold = (uint64_t)(((255 - g_tia_paddle[pidx]) * 16384) / 255);
                 if (tia->dump_disabled_cycle == 0 ||
-                    (cpu_clock - tia->dump_disabled_cycle) > 380) {
+                    (cpu_clock - tia->dump_disabled_cycle) > threshold) {
                     retval = 0x80;
                 } else {
                     retval = 0x00;
                 }
             }
             break;
+        }
         case INPT4:
             retval = g_frame_trigger[0] ? 0x00 : 0x80;
             if (g_inpt4_log_count < 20) {
@@ -1181,6 +1185,14 @@ void tia_frame_consumed(void)
 {
 }
 
+void tia_set_paddle(int idx, int val)
+{
+    if (idx < 0 || idx > 3) return;
+    if (val < 0)   val = 0;
+    if (val > 255) val = 255;
+    g_tia_paddle[idx] = val;
+}
+
 void tia_init(TIA *tia)
 {
     if (!g_tables_built) {
@@ -1192,6 +1204,8 @@ void tia_init(TIA *tia)
     memset(g_frame_buffers[1], 0, FB_WIDTH * FB_HEIGHT);
     g_frame_buffer = g_frame_buffers[0];
     g_display_buffer = g_frame_buffers[1];
+
+    g_tia_paddle[0] = g_tia_paddle[1] = g_tia_paddle[2] = g_tia_paddle[3] = 127;
 
     /* Enable frame summary + anomaly detection for first 5 frames */
     tia_dbg_init(

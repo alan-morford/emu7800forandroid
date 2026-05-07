@@ -136,6 +136,9 @@ void tia_set_frame_start_clock(uint64_t clock);
 int tia_frame_ready(void);      /* Check if new frame is available */
 void tia_frame_consumed(void);  /* Signal that frame has been rendered */
 
+/* Paddle position for INPT0-3 capacitor timing. idx=0-3, val=0-255 (0=left/late, 255=right/early). */
+void tia_set_paddle(int idx, int val);
+
 /* Reset VSYNC/VBLANK diagnostic log counter */
 void tia_reset_sync_log(void);
 

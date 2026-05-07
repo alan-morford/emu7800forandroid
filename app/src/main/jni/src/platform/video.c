@@ -5,11 +5,8 @@
  * 8-bit indexed → RGB565 conversion via pre-computed palette LUT.
  *
  * Scaling pipeline:
- *   1. Apply pixel aspect ratio (PAR) to get correct display proportions:
- *        2600: PAR 1.2  (160 × 1.2 = 192 wide, pixels are wider than tall)
- *        7800: PAR ≈1.0 (320 × PAR ≈ 320, targets 4:3 display)
- *   2. Apply display mode (MAX HEIGHT=fill height keep AR, STRETCH=fill both).
- *   3. Centre the result on screen; letterbox/pillarbox with black.
+ *   ORIGINAL: 4:3 aspect ratio at full screen height (pillarboxed if narrower than screen).
+ *   FULLSCREEN: stretch to fill the full screen.
  *
  * Overlay (virtual gamepad) is drawn in screen pixel coordinates so its
  * size is independent of the emulator resolution.
@@ -132,21 +129,25 @@ static SDL_Rect compute_dest_rect(void)
     int sw, sh;
     get_screen_size(&sw, &sh);
 
-    float disp_w = (float)g_fb_w * g_par;
-    float disp_h = (float)g_fb_h;
-
-    /* Both modes fill the screen height exactly. */
-    float scale_h = (float)sh / disp_h;
     int final_h = sh;
     int final_w;
 
     if (g_zoom_level == 1) {
-        /* STRETCH: expand width to fill the full screen width too. */
+        /* FULLSCREEN: fill both dimensions. */
         final_w = sw;
     } else {
-        /* MAX HEIGHT: maintain correct aspect ratio at full screen height. */
-        final_w = (int)(disp_w * scale_h + 0.5f);
+        /* ORIGINAL: 4:3 at full screen height. */
+        final_w = 4 * sh / 3;
         if (final_w > sw) final_w = sw;
+    }
+
+    static int logged = 0;
+    if (!logged) {
+        char buf[128];
+        SDL_snprintf(buf, sizeof(buf),
+            "video: sw=%d sh=%d zoom=%d fw=%d fh=%d", sw, sh, g_zoom_level, final_w, final_h);
+        log_msg(buf);
+        logged = 1;
     }
 
     SDL_Rect dst;

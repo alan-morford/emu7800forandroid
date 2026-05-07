@@ -178,6 +178,7 @@ static void launch_selected_rom(void)
         rc = machine_load_rom_data(rom_data, (long)rom_size, actual_mtype);
         free(rom_data);
         if (rc == 0) {
+            machine_detect_paddle(path);
             snprintf(msg, sizeof(msg),
                 "===== ROM LOADED (ZIP): %s (%s) =====",
                 path, actual_mtype == MACHINE_2600 ? "2600" : "7800");

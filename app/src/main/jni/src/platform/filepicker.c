@@ -825,7 +825,7 @@ static FPLayout compute_layout(SDL_Renderer *r)
     L.recent_w = font_string_width("RECENT", L.font_scale) + 16;
     L.recent_h = row_h - 4;
     L.recent_x = 2;
-    L.recent_y = row_h + 2;
+    L.recent_y = g_has_last_rom ? (row_h + 2) : 2;
 
     /* Center area for EMU7800 title: between left buttons and gear */
     {
@@ -1578,8 +1578,11 @@ void filepicker_draw(SDL_Renderer *r)
         fname_noext[sizeof(fname_noext) - 1] = '\0';
         char *dot = strrchr(fname_noext, '.');
         if (dot) *dot = '\0';
-        if (nx + font_string_width(fname_noext, L.font_scale) < L.gear_x - 4)
-            font_draw_string(r, fname_noext, nx, ny, L.font_scale, 255, 255, 255);
+        if ((int)strlen(fname_noext) > 20) {
+            fname_noext[20] = '\0';
+            strncat(fname_noext, "...", sizeof(fname_noext) - strlen(fname_noext) - 1);
+        }
+        font_draw_string(r, fname_noext, nx, ny, L.font_scale, 255, 255, 255);
     }
 
     /* RECENT button — only shown when the recent list is non-empty */
