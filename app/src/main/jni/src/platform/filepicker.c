@@ -932,19 +932,37 @@ static void draw_recent_popup(SDL_Renderer *r, const FPLayout *L)
     SDL_SetRenderDrawColor(r, 180, 120, 0, 200);
     SDL_RenderDrawLine(r, px + 4, py + title_h, px + pw - 4, py + title_h);
 
-    int btn_h   = L->resume_h;
-    int list_h  = ph - title_h - btn_h - 20;
-    int visible = list_h / L->item_h;
-    int start   = (int)g_recent_scroll;
+    int btn_h        = L->resume_h;
+    int list_h       = ph - title_h - btn_h - 8;
+    int visible      = list_h / L->item_h;
+    int draw_visible = (list_h + L->item_h - 1) / L->item_h;
+    int start        = (int)g_recent_scroll;
     if (start > g_recent_count - visible) start = g_recent_count - visible;
     if (start < 0) start = 0;
+
+    int sb_w = 6;
+    int sb_x = px + pw - sb_w - 4;
+    if (g_recent_count > visible) {
+        int bar_h      = list_h;
+        int thumb_h    = bar_h * visible / g_recent_count;
+        if (thumb_h < 20) thumb_h = 20;
+        int max_scroll = g_recent_count - visible;
+        if (max_scroll < 1) max_scroll = 1;
+        int thumb_y = py + title_h + 2 + (int)((float)g_recent_scroll / max_scroll * (bar_h - thumb_h));
+        fp_fill_rect(r, sb_x, py + title_h + 2, sb_w, bar_h, 40, 40, 40, 180);
+        fp_fill_rect(r, sb_x, thumb_y, sb_w, thumb_h, 200, 100, 0, 200);
+    }
+
+    int text_avail_w = pw - 12 - sb_w - 8;
+    int max_chars    = text_avail_w / (8 * L->font_scale);
+    if (max_chars < 4) max_chars = 4;
 
     if (g_recent_count == 0) {
         font_draw_string(r, "(empty)", px + 12, py + title_h + 8, L->font_scale, 160, 160, 160);
     } else {
-        SDL_Rect clip = {px + 2, py + title_h + 2, pw - 4, list_h};
+        SDL_Rect clip = {px + 2, py + title_h + 2, pw - sb_w - 6, list_h};
         SDL_RenderSetClipRect(r, &clip);
-        for (int i = start; i < g_recent_count && i < start + visible; i++) {
+        for (int i = start; i < g_recent_count && i < start + draw_visible; i++) {
             int iy = py + title_h + 4 + (i - start) * L->item_h;
             const char *fname = strrchr(g_recent_paths[i], '/');
             fname = fname ? fname + 1 : g_recent_paths[i];
@@ -953,6 +971,12 @@ static void draw_recent_popup(SDL_Renderer *r, const FPLayout *L)
             fname_noext[sizeof(fname_noext) - 1] = '\0';
             char *dot = strrchr(fname_noext, '.');
             if (dot) *dot = '\0';
+            if ((int)strlen(fname_noext) > max_chars) {
+                fname_noext[max_chars - 3] = '.';
+                fname_noext[max_chars - 2] = '.';
+                fname_noext[max_chars - 1] = '.';
+                fname_noext[max_chars]     = '\0';
+            }
             font_draw_string(r, fname_noext, px + 12, iy + (L->item_h - 8 * L->font_scale) / 2,
                             L->font_scale, 255, 255, 255);
         }
@@ -1872,10 +1896,9 @@ void filepicker_touch_move(int x, int y)
             if (new_s > max_s) new_s = max_s;
             g_dirpicker_scroll = new_s;
         } else if (g_scroll_mode == 2) {
-            /* Recent popup: ph = sh*3/4, title_h, btn_h = item_h, list_h = ph-title_h-btn_h-20 */
-            int ph      = L.sh * 3 / 4;
+            int ph      = fp_px_dp(400); if (ph > L.sh * 9 / 10) ph = L.sh * 9 / 10;
             int title_h = 10 * L.title_scale + 8;
-            int list_h  = ph - title_h - L.item_h - 20;
+            int list_h  = ph - title_h - L.resume_h - 8;
             int visible = list_h / L.item_h;
             float max_s = (float)(g_recent_count - visible);
             if (max_s < 0) max_s = 0;
@@ -2369,7 +2392,7 @@ int filepicker_touch_up(int x, int y)
         }
         /* List items */
         int btn_h   = L.resume_h;
-        int list_h  = ph - title_h - btn_h - 20;
+        int list_h  = ph - title_h - btn_h - 8;
         int visible = list_h / L.item_h;
         int start   = (int)g_recent_scroll;
         if (start < 0) start = 0;
