@@ -1669,12 +1669,11 @@ void filepicker_draw(SDL_Renderer *r)
     /* File list panel: semi-transparent overlay covers from sep_y to bottom. */
     fp_fill_rect(r, L.list_x, L.sep_y + 2, L.list_w, L.sh - L.sep_y - 2, 0, 0, 0, 180);
 
-    /* Up arrow icon — drawn just below the separator, outside the list clip rect.
-     * Only shown when the list is not scrolled (i.e. the ".." entry is at position 0). */
+    /* Up arrow icon — pinned just below the separator, outside the list clip rect.
+     * Always visible whenever "../" is present (i.e. not at the allowed root). */
     {
-        int start = (int)g_scroll_offset;
         int has_back = (g_file_count > 0 && strcmp(g_files[0].name, "..") == 0);
-        if (has_back && start == 0 && g_up_tex) {
+        if (has_back && g_up_tex) {
             int ih = (L.item_h / 2 - 16) * 3;
             if (ih < 1) ih = 1;
             int iw = ih * UP_IMG_W / UP_IMG_H;

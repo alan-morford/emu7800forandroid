@@ -38,6 +38,12 @@ extern void log_msg(const char *msg);
 #define TEX_H_2600  256
 #define SKIP_2600     0
 
+/* CRT display window: scanlines 0–30 are hidden by the bezel on real hardware.
+ * Games that turn VBLANK off before scanline 31 write overscan rows to the top
+ * of the frame buffer — we skip those so the image is positioned correctly. */
+#define CRT_START_SL  31
+#define CRT_MAX_H    210
+
 /*
  * Pixel aspect ratios (PAR): how many display pixels wide each emulator
  * pixel should be, relative to its height.
@@ -203,7 +209,7 @@ void video_set_machine_type(int type)
 }
 
 /* Draw scanline overlay over the rendered frame destination rect. */
-static void draw_scanlines(SDL_Renderer *r, SDL_Rect *dst)
+static void draw_scanlines(SDL_Renderer *r, SDL_Rect *dst, int src_h)
 {
     if (!g_scanlines) return;
 
@@ -216,7 +222,7 @@ static void draw_scanlines(SDL_Renderer *r, SDL_Rect *dst)
     Uint8 a        = alphas[bright_idx];
     int   line_h   = line_heights[bright_idx];
 
-    float scale_y = (float)dst->h / (float)g_fb_h;
+    float scale_y = (float)dst->h / (float)src_h;
     int step = (int)(scale_y + 0.5f);  /* round to nearest integer */
     if (step < 2) return;              /* too small to show distinct lines */
 
@@ -242,6 +248,26 @@ void video_render(void)
 
     if (!src) return;
 
+    /* For 2600 games, apply CRT display window correction:
+     * games that turn VBLANK off before scanline 31 store overscan rows at
+     * the top of the frame buffer that a real CRT hides behind the bezel.
+     * Skip those rows so the image is positioned as it would be on original hardware. */
+    int skip = g_skip;
+    int fb_h = g_fb_h;
+    if (mtype != MACHINE_7800) {
+        int vbo_sl   = tia_get_vblank_off_scanline();
+        int active_h = tia_get_active_height();
+        if (active_h < 1) active_h = 192;
+        if (vbo_sl >= 0 && vbo_sl < CRT_START_SL) {
+            skip = CRT_START_SL - vbo_sl;
+            if (skip >= active_h) skip = 0;
+        }
+        fb_h = active_h - skip;
+        if (skip > 0 && fb_h > CRT_MAX_H) fb_h = CRT_MAX_H;
+        if (fb_h < 1)          fb_h = 192;
+        if (fb_h > TEX_H_2600) fb_h = TEX_H_2600;
+    }
+
     /* Upload frame to texture */
     void *pixels;
     int   pitch;
@@ -250,8 +276,8 @@ void video_render(void)
     uint16_t *dst     = (uint16_t *)pixels;
     int       pitch16 = pitch / 2;
 
-    for (int y = 0; y < g_fb_h; y++) {
-        const uint8_t *row  = src + (g_skip + y) * stride;
+    for (int y = 0; y < fb_h; y++) {
+        const uint8_t *row  = src + (skip + y) * stride;
         uint16_t      *drow = dst + y * pitch16;
         for (int x = 0; x < g_fb_w; x++)
             drow[x] = pal[row[x]];
@@ -262,11 +288,11 @@ void video_render(void)
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
     SDL_RenderClear(g_renderer);
 
-    SDL_Rect src_rect = {0, 0, g_fb_w, g_fb_h};
+    SDL_Rect src_rect = {0, 0, g_fb_w, fb_h};
     SDL_Rect dst_rect = compute_dest_rect();
     SDL_RenderCopy(g_renderer, g_texture, &src_rect, &dst_rect);
 
-    draw_scanlines(g_renderer, &dst_rect);
+    draw_scanlines(g_renderer, &dst_rect, fb_h);
 
     /* Virtual gamepad drawn in screen pixel coordinates */
     input_draw_overlay(g_renderer);

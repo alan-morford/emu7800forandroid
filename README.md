@@ -1,7 +1,7 @@
 # emu7800forandroid
 This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is itself a port from EMU7800. EMU7800 was developed by Atari enthusiast Mike Murphy. Originally released around 2003, the emulator is an open-source project (GNU GPLv2) designed for Windows and later adapted for other platforms, with active development continuing on GitHub. Portions of this port of EMU7800 also utilized open-source code from Stella version 7.0 (released in Oct 2024). Stella was originally developed for Linux by Bradford W. Mott and is now maintained and developed by Stephen Anthony and the Stella Team.
 
-**Current version: 1.2.1**
+**Current version: 1.2.3**
 
 ## Features
 - Atari 2600 and 7800 ProSystem support
@@ -25,6 +25,15 @@ This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is
 - Auto-resize for book-style foldable support
 
 ## Changelog
+
+### v1.2.3 (2026-05-21)
+- Fixed: Atari 2600 games with early VBLANK-off (e.g. Tapper) now display correctly — CRT display window correction removes overscan rows that real hardware hides behind the bezel
+- Fixed: Up directory arrow in the file picker now stays visible while scrolling, not just when the list is at the top
+
+### v1.2.2 (2026-05-19)
+- Recent list now shows a scrollbar when there are more entries than fit on screen
+- Long filenames in the recent list are truncated with ellipsis
+- Recent list popup shows more items by using available space up to the CLOSE button
 
 ### v1.2.1 (2026-05-07)
 - Added Atari 2600 paddle controller support with auto-detection by ROM name
