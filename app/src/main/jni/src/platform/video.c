@@ -25,12 +25,30 @@
 
 extern void log_msg(const char *msg);
 
-/* Framebuffer dimensions per machine type. */
-#define FB_W_7800   320
-#define FB_H_7800   242    /* visible scanlines (skip first 11 vblank lines) */
+/* Framebuffer dimensions per machine type.
+ *
+ * Horizontal: no crop. MARIA's native buffer is 320 columns and all of them
+ * are picture — ProSystem and upstream EMU7800 both show 0..319. An earlier
+ * HCROP_7800 of 32 was added to chase the Epyx-engine colour bug; that bug
+ * turned out to be cart mis-detection plus the WSYNC quirk (see cart.c), and
+ * measuring the frames afterwards showed the crop was discarding real content
+ * in 58 of 74 7800 ROMs. Kung Fu Master's black strip down the left edge is
+ * drawn by the game itself and appears in every 7800 emulator.
+ *
+ * Vertical: MARIA draws 242 scanlines but a real NTSC set only shows about
+ * 223 of them, so showing all 242 put the picture too high and squashed it.
+ * ProSystem distinguishes displayArea (rasters 16..258) from visibleArea
+ * (rasters 26..248 — 223 lines); our framebuffer row R corresponds to its
+ * raster R+5, so its visible band is our rows 21..243 and we start one row
+ * later so row 22 holds the first TV-visible scanline. Verified over all 74
+ * 7800 ROMs: only 5 have any non-uniform content in the removed rows, never
+ * more than a few lines of overscan. */
+#define HCROP_7800    0
+#define FB_W_7800   (320 - 2 * HCROP_7800)
+#define FB_H_7800   223    /* TV-visible scanlines */
 #define TEX_W_7800  512    /* next power-of-2 ≥ 320 */
-#define TEX_H_7800  256    /* next power-of-2 ≥ 242 */
-#define SKIP_7800    11
+#define TEX_H_7800  256    /* next power-of-2 ≥ 223 */
+#define SKIP_7800    22    /* first TV-visible framebuffer row */
 
 #define FB_W_2600   160
 #define FB_H_2600   210    /* typical visible NTSC scanlines */
@@ -66,7 +84,7 @@ static uint16_t g_maria_pal[256];
 /* Settings */
 static int g_scanlines        = 0;
 static int g_scanline_bright  = 1;   /* 0=dark, 1=medium, 2=bright */
-static int g_maria_palette    = 0;   /* 0=warm, 1=cool, 2=original */
+static int g_maria_palette    = 0;   /* 0=warm, 1=cool, 2=original, 3=EMU7800 */
 static int g_zoom_level       = 0;   /* 0=MAX HEIGHT, 1=STRETCH */
 
 static const char *g_zoom_labels[] = { "ORIGINAL", "FULLSCREEN" };
@@ -268,6 +286,9 @@ void video_render(void)
         if (fb_h > TEX_H_2600) fb_h = TEX_H_2600;
     }
 
+    /* Horizontal crop, if any — see HCROP_7800 comment above. */
+    int hskip = (mtype == MACHINE_7800) ? HCROP_7800 : 0;
+
     /* Upload frame to texture */
     void *pixels;
     int   pitch;
@@ -277,7 +298,7 @@ void video_render(void)
     int       pitch16 = pitch / 2;
 
     for (int y = 0; y < fb_h; y++) {
-        const uint8_t *row  = src + (skip + y) * stride;
+        const uint8_t *row  = src + (skip + y) * stride + hskip;
         uint16_t      *drow = dst + y * pitch16;
         for (int x = 0; x < g_fb_w; x++)
             drow[x] = pal[row[x]];
@@ -349,9 +370,16 @@ int video_get_scanline_brightness(void)     { return g_scanline_bright; }
 void video_set_maria_palette(int palette)
 {
     if (palette < 0) palette = 0;
-    if (palette > 2) palette = 2;
+    if (palette >= MARIA_PALETTE_COUNT) palette = MARIA_PALETTE_COUNT - 1;
     g_maria_palette = palette;
-    build_pal565_tinted(maria_ntsc_palette, g_maria_pal, palette);
+
+    /* Options 0-2 tint the Trebor NTSC table; option 3 is upstream EMU7800's
+     * own table, used verbatim so it can be compared against that emulator. */
+    if (palette == MARIA_PALETTE_EMU7800) {
+        build_pal565(maria_get_palette(MARIA_PALETTE_EMU7800), g_maria_pal);
+    } else {
+        build_pal565_tinted(maria_ntsc_palette, g_maria_pal, palette);
+    }
 }
 int video_get_maria_palette(void)           { return g_maria_palette; }
 

@@ -156,77 +156,57 @@ typedef struct {
     int right_controller;
 } RomDbEntry;
 
-static const RomDbEntry rom_properties_db[] = {
-    /* Alien Brigade (NTSC) - S9 + Lightgun */
-    {{0x87,0x7d,0xcc,0x97,0xa7,0x75,0xed,0x55,0x08,0x18,0x64,0xb2,0xdb,0xf5,0xf1,0xe2},
-     CART_7800_S9, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Alien Brigade (PAL) - S9 + Lightgun */
-    {{0xde,0x3e,0x94,0x96,0xcb,0x73,0x41,0xf8,0x65,0xf2,0x7e,0x5a,0x72,0xc7,0xf2,0xf5},
-     CART_7800_S9, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Barnyard Blaster (NTSC) - SG + Lightgun */
-    {{0x42,0x68,0x24,0x15,0x90,0x6c,0x21,0xc6,0xaf,0x80,0xe4,0x19,0x84,0x03,0xff,0xda},
-     CART_7800_SG, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Barnyard Blaster (PAL) - SG + Lightgun */
-    {{0xba,0xbe,0x2b,0xc2,0x97,0x66,0x88,0xba,0xfb,0x8b,0x23,0xc1,0x92,0x65,0x81,0x26},
-     CART_7800_SG, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Crossbow (NTSC) - S9 + Lightgun */
-    {{0xa9,0x4e,0x45,0x60,0xb6,0xad,0x05,0x3a,0x1c,0x24,0xe0,0x96,0xf1,0x26,0x2e,0xbf},
-     CART_7800_S9, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Crossbow (PAL) - S9 + Lightgun */
-    {{0x63,0xdb,0x37,0x1d,0x67,0xa9,0x8d,0xae,0xc5,0x47,0xb2,0xab,0xd5,0xe7,0xaa,0x95},
-     CART_7800_S9, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Meltdown (NTSC) - SG + Lightgun */
-    {{0xbe,0xdc,0x30,0xec,0x43,0x58,0x7e,0x0c,0x98,0xfc,0x38,0xc3,0x9c,0x1e,0xf9,0xd0},
-     CART_7800_SG, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Meltdown (PAL) - SG + Lightgun */
-    {{0xc8,0x01,0x55,0xd7,0xee,0xc9,0xe3,0xdc,0xb7,0x9a,0xa6,0xb8,0x3c,0x9c,0xcd,0x1e},
-     CART_7800_SG, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Sentinel (NTSC) - SG + Lightgun */
-    {{0xb6,0x97,0xd9,0xc2,0xd1,0xb9,0xf6,0xcb,0x21,0x04,0x12,0x86,0xd1,0xbb,0xfa,0x7f},
-     CART_7800_SG, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* Sentinel (PAL) - SG + Lightgun */
-    {{0x54,0x69,0xb4,0xde,0x06,0x08,0xf2,0x3a,0x5c,0x4f,0x98,0xf3,0x31,0xc9,0xe7,0x5f},
-     CART_7800_SG, CTRL_LIGHTGUN, CTRL_LIGHTGUN},
-    /* F-18 Hornet (NTSC) - Absolute */
-    {{0x22,0x51,0xa6,0xa0,0xf3,0xae,0xc8,0x4c,0xc0,0xaf,0xf6,0x6f,0xc9,0xfa,0x91,0xe8},
-     CART_7800_AB, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* F-18 Hornet (PAL) - Absolute */
-    {{0xe7,0x70,0x9d,0xa8,0xe4,0x9d,0x37,0x67,0x30,0x19,0x47,0xa0,0xa0,0xb9,0xd2,0xe6},
-     CART_7800_AB, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Pit Fighter (NTSC) - S4 */
-    {{0x05,0xf4,0x32,0x44,0x46,0x59,0x43,0xce,0x81,0x97,0x80,0xa7,0x1a,0x5b,0x57,0x2a},
-     CART_7800_S4, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* RealSports Baseball (NTSC) - S4 */
-    {{0x38,0x3e,0xd9,0xbd,0x1e,0xfb,0x9b,0x6c,0xb3,0x38,0x8a,0x77,0x76,0x78,0xc9,0x28},
-     CART_7800_S4, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Tank Command (NTSC) - S4 */
-    {{0x5c,0x4f,0x75,0x23,0x71,0xa5,0x23,0xf1,0x5e,0x99,0x80,0xfe,0xa7,0x3b,0x87,0x4d},
-     CART_7800_S4, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Tower Toppler (NTSC) - S4R (RAM at $6000) */
-    {{0x8d,0x64,0x76,0x3d,0xb3,0x10,0x0a,0xad,0xc5,0x52,0xdb,0x5e,0x68,0x68,0x50,0x6a},
-     CART_7800_S4R, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Tower Toppler (PAL) - S4R (RAM at $6000) */
-    {{0x32,0xa3,0x72,0x44,0xa9,0xc6,0xcc,0x92,0x8d,0xcd,0xf0,0x2b,0x45,0x36,0x5a,0xa8},
-     CART_7800_S4R, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Water Ski (NTSC) - S4 */
-    {{0x42,0x7c,0xb0,0x5d,0x0a,0x1a,0xbb,0x06,0x89,0x98,0xe2,0x76,0x0d,0x77,0xf4,0xfb},
-     CART_7800_S4, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Jinks (NTSC) - SGR (SuperGame + RAM at $4000) */
-    {{0x04,0x5f,0xd1,0x20,0x50,0xb7,0xf2,0xb8,0x42,0xd5,0x97,0x0f,0x24,0x14,0xe9,0x12},
-     CART_7800_SGR, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-    /* Jinks (PAL) - SGR (SuperGame + RAM at $4000) */
-    {{0xdf,0xb8,0x6f,0x4d,0x06,0xf0,0x5a,0xd0,0x0c,0xf4,0x18,0xf0,0xa5,0x9a,0x24,0xf7},
-     CART_7800_SGR, CTRL_PROLINE_JOYSTICK, CTRL_PROLINE_JOYSTICK},
-};
+/*
+ * ROM properties table, generated from EMU7800's upstream ROMProperties.csv.
+ * See tools/gen_romdb.py. Sorted by MD5 for binary search.
+ *
+ * This replaces size/byte-pattern guessing for carts whose bankswitching
+ * scheme is not derivable from the ROM image -- notably A78SGR (SuperGame
+ * with 16KB RAM at $4000), which is indistinguishable from plain A78SG by
+ * inspection but renders as garbage without the RAM.
+ */
+#include "rom_db.h"
+
 #define NUM_ROM_DB_ENTRIES (sizeof(rom_properties_db) / sizeof(rom_properties_db[0]))
+
+/* Per-cart quirk table, generated from ProSystem's Database.c. */
+typedef struct {
+    uint8_t md5[16];
+    uint32_t flags;
+} CartQuirkEntry;
+
+#include "quirk_db.h"
+
+#define NUM_CART_QUIRK_ENTRIES (sizeof(cart_quirk_db) / sizeof(cart_quirk_db[0]))
+
+/*
+ * Look up per-cart quirks. The digest is taken over the ROM image *after* any
+ * 128-byte A78 header has been stripped, matching ProSystem's cartridge_digest.
+ */
+static uint32_t lookup_cart_quirks(const uint8_t *md5)
+{
+    int lo = 0, hi = (int)NUM_CART_QUIRK_ENTRIES - 1;
+
+    while (lo <= hi) {
+        int mid = lo + ((hi - lo) >> 1);
+        int cmp = memcmp(md5, cart_quirk_db[mid].md5, 16);
+        if (cmp == 0) return cart_quirk_db[mid].flags;
+        if (cmp < 0) hi = mid - 1; else lo = mid + 1;
+    }
+    return 0;
+}
 
 /* Look up ROM MD5 in properties database. Returns entry or NULL. */
 static const RomDbEntry *lookup_rom_db(const uint8_t *md5)
 {
-    size_t i;
-    for (i = 0; i < NUM_ROM_DB_ENTRIES; i++) {
-        if (memcmp(md5, rom_properties_db[i].md5, 16) == 0)
-            return &rom_properties_db[i];
+    int lo = 0, hi = (int)NUM_ROM_DB_ENTRIES - 1;
+
+    /* Table is sorted by MD5 (see tools/gen_romdb.py). */
+    while (lo <= hi) {
+        int mid = lo + ((hi - lo) >> 1);
+        int cmp = memcmp(md5, rom_properties_db[mid].md5, 16);
+        if (cmp == 0) return &rom_properties_db[mid];
+        if (cmp < 0) hi = mid - 1; else lo = mid + 1;
     }
     return NULL;
 }
@@ -597,6 +577,22 @@ int cart_load(Cart *cart, const uint8_t *data, int size, int machine_type)
                 }
                 log_msg("cart_load: ROM identified from properties database (MD5 match)");
             }
+        }
+    }
+
+    /*
+     * Per-cart quirk lookup. Done here, after any A78 header has been stripped,
+     * so the digest matches ProSystem's (which hashes the bare ROM image).
+     */
+    if (machine_type == 1) {
+        uint8_t qmd5[16];
+        md5_compute(data, (size_t)size, qmd5);
+        cart->quirk_flags = lookup_cart_quirks(qmd5);
+        if (cart->quirk_flags) {
+            snprintf(msg, sizeof(msg), "cart_load: quirk flags=0x%02X%s",
+                     (unsigned)cart->quirk_flags,
+                     (cart->quirk_flags & CART_QUIRK_NO_WSYNC) ? " (WSYNC halt disabled)" : "");
+            log_msg(msg);
         }
     }
 

@@ -484,6 +484,18 @@ static void set_blon(TIA *tia)
  * Writes pixels using 2D addressing with VBLANK-OFF anchor.
  * ======================================================================== */
 
+/*
+ * Advance a TIA position counter by one, wrapping at 160.
+ *
+ * Position counters wrap at 160 but may legitimately be negative: RESPx/RESMx
+ * set them to -4, -2 or -((hsync-68)>>1), so they occupy roughly -80..159. C's
+ * `%` leaves negative values alone for that range, and so does this. Exactly
+ * equivalent to the old `(v + 1) % 160`, minus a reciprocal-multiply per
+ * counter per colour clock -- this loop runs ~60k times a frame and is the
+ * single hottest thing in 2600 emulation (80% of frame time).
+ */
+#define TIA_ADV160(v) do { if (++(v) >= 160) (v) = 0; } while (0)
+
 static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
 {
     int hblank_edge;
@@ -494,7 +506,7 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
         int cxflags;
 
         /* Increment HSync (represents the clock being processed) */
-        tia->hsync = (tia->hsync + 1) % 228;
+        if (++tia->hsync >= 228) tia->hsync = 0;
 
         /* HMOVE startup */
         if (tia->start_clock == tia->start_hmove_clock) {
@@ -509,11 +521,11 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
         /* Position counter increment during visible portion */
         hblank_edge = 68 + (tia->hmove_latch ? 8 : 0);
         if (tia->hsync >= hblank_edge) {
-            tia->p0 = (tia->p0 + 1) % 160;
-            tia->p1 = (tia->p1 + 1) % 160;
-            tia->m0 = (tia->m0 + 1) % 160;
-            tia->m1 = (tia->m1 + 1) % 160;
-            tia->bl = (tia->bl + 1) % 160;
+            TIA_ADV160(tia->p0);
+            TIA_ADV160(tia->p1);
+            TIA_ADV160(tia->m0);
+            TIA_ADV160(tia->m1);
+            TIA_ADV160(tia->bl);
         }
 
         /* HMOVE compare: once every 1/4 CLK (phase 0) when active */
@@ -529,11 +541,11 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
         /* HMOVE increment: phase 2, during hblank only */
         if (tia->hmove_counter < 0xf && (tia->hsync & 3) == 2) {
             if (tia->hsync < hblank_edge) {
-                if (tia->p0mmr) tia->p0 = (tia->p0 + 1) % 160;
-                if (tia->p1mmr) tia->p1 = (tia->p1 + 1) % 160;
-                if (tia->m0mmr) tia->m0 = (tia->m0 + 1) % 160;
-                if (tia->m1mmr) tia->m1 = (tia->m1 + 1) % 160;
-                if (tia->blmmr) tia->bl = (tia->bl + 1) % 160;
+                if (tia->p0mmr) TIA_ADV160(tia->p0);
+                if (tia->p1mmr) TIA_ADV160(tia->p1);
+                if (tia->m0mmr) TIA_ADV160(tia->m0);
+                if (tia->m1mmr) TIA_ADV160(tia->m1);
+                if (tia->blmmr) TIA_ADV160(tia->bl);
             }
         }
 

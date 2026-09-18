@@ -54,6 +54,9 @@ void maria_set_dma_read(uint8_t (*read_func)(uint16_t));
 /* Set input callbacks for button reading */
 void maria_set_input_callbacks(int (*trigger)(int), int (*trigger2)(int));
 
+/* Enable/disable the WSYNC CPU halt (per-cart quirk, see cart.h) */
+void maria_set_wsync_enabled(int enabled);
+
 /* Set CPU preempt callback for WSYNC */
 void maria_set_cpu_preempt_callback(void (*preempt_func)(void));
 
@@ -70,10 +73,11 @@ void maria_enable_diagnostics(int frames);
 extern const uint32_t maria_ntsc_palette[256];
 
 /* Palette selection */
-#define MARIA_PALETTE_COOL  0
-#define MARIA_PALETTE_WARM  1
-#define MARIA_PALETTE_HOT   2
-#define MARIA_PALETTE_COUNT 3
+#define MARIA_PALETTE_COOL    0
+#define MARIA_PALETTE_WARM    1
+#define MARIA_PALETTE_HOT     2
+#define MARIA_PALETTE_EMU7800 3   /* upstream EMU7800 MariaTables.cs */
+#define MARIA_PALETTE_COUNT   4
 const uint32_t *maria_get_palette(int index);
 
 /* Save state: get/set internal statics */

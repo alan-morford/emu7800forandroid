@@ -87,7 +87,15 @@ typedef struct {
     int has_sc_ram;        /* Non-zero if cart has Super Chip (F8SC/F6SC/F4SC) */
     int left_controller;   /* Controller type for left jack */
     int right_controller;  /* Controller type for right jack */
+    uint32_t quirk_flags;  /* Per-cart hardware quirks, see CART_QUIRK_* */
 } Cart;
+
+/*
+ * Per-cart quirks, imported from ProSystem's Database.c (tools/gen_quirkdb.py).
+ * These are deviations that cannot currently be derived from a general rule.
+ */
+#define CART_QUIRK_CYCLE_STEALING 0x01  /* ProSystem-only; we always steal */
+#define CART_QUIRK_NO_WSYNC       0x02  /* MARIA WSYNC must not halt the CPU */
 
 /* Initialize cart */
 void cart_init(Cart *cart);

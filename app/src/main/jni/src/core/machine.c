@@ -118,6 +118,19 @@ static uint8_t maria_dma_read(uint16_t addr)
     return mem_read_7800(addr);
 }
 
+/*
+ * Debug: read a byte through the active machine's bus, exactly as the CPU
+ * (and Maria DMA) would see it. Used by the headless verification harness to
+ * walk DLL/DL structures independently; has no effect on normal operation.
+ */
+uint8_t machine_peek_bus(uint16_t addr)
+{
+    if (g_machine_type == MACHINE_7800) {
+        return mem_read_7800(addr);
+    }
+    return mem_read_2600(addr);
+}
+
 /* Input callbacks for Maria */
 static int maria_trigger_callback(int player)
 {
@@ -537,6 +550,7 @@ void machine_reset(void)
         pia_reset(&g_pia, 0);
         cart_reset(&g_cart);
         tiasound_reset();
+        maria_set_wsync_enabled(1);
 
         m6502_init(&g_cpu, 1);
         m6502_reset(&g_cpu, mem_read_2600);
@@ -552,6 +566,9 @@ void machine_reset(void)
         pia_reset(&g_pia, 1);  /* 7800 mode */
         cart_reset(&g_cart);
         tiasound_reset();
+
+        /* Apply per-cart quirks (see cart.h / tools/gen_quirkdb.py). */
+        maria_set_wsync_enabled((g_cart.quirk_flags & CART_QUIRK_NO_WSYNC) == 0);
 
         /* 7800 CPU runs at 1.79 MHz (vs 2600's 1.19 MHz) */
         /* Use run clocks multiple of 4 for proper DMA timing */

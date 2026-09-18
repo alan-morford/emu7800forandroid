@@ -36,7 +36,7 @@ void video_set_scanline_brightness(int level);  /* 0=dark, 1=medium, 2=bright */
 int  video_get_scanline_brightness(void);
 
 /* Maria palette selection for 7800 games. */
-void video_set_maria_palette(int palette);      /* 0=warm, 1=cool, 2=original */
+void video_set_maria_palette(int palette);      /* 0=warm, 1=cool, 2=original, 3=EMU7800 */
 int  video_get_maria_palette(void);
 
 /* Zoom level cycling. */

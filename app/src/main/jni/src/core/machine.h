@@ -78,6 +78,9 @@ int machine_get_right_controller(void);
 /* Supercharger support: distinct access tracking */
 uint32_t machine_get_distinct_accesses(void);
 
+/* Debug: read a byte through the active machine's bus (diagnostics only) */
+uint8_t machine_peek_bus(uint16_t addr);
+
 /* Supercharger support: direct RAM peek/poke (bypasses TIA/PIA decoding) */
 uint8_t machine_peek_ram(uint16_t addr);
 void machine_poke_ram(uint16_t addr, uint8_t data);

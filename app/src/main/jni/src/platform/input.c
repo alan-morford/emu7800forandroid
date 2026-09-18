@@ -27,6 +27,7 @@
 #include <SDL.h>
 #include "input.h"
 #include "machine.h"
+#include "maria.h"
 #include "savestate.h"
 #include "video.h"
 #include "font.h"
@@ -1074,7 +1075,7 @@ static void get_opt_value_str(int row, char *buf, int bufsz)
     static const char *onoff[]       = {"OFF", "ON"};
     static const char *visibility[]  = {"OFF", "DIMMER", "DIM", "BRIGHT"};
     static const char *sizes[]       = {"SMALL", "MEDIUM", "LARGE"};
-    static const char *palettes[]    = {"WARM", "COOL", "ORIG"};
+    static const char *palettes[]    = {"WARM", "COOL", "ORIG", "EMU7800"};
     static const char *scanbright[]  = {"OFF", "LIGHT", "MEDIUM", "DARK"};
     switch (row) {
     case 0: snprintf(buf, bufsz, "%s", onoff[g_autosave & 1]); break;
@@ -1131,7 +1132,7 @@ static void cycle_opt_value(int row)
             else       video_set_scanlines(0);                 /* DARK → OFF */
         }
         break;
-    case 7: video_set_maria_palette((video_get_maria_palette() + 1) % 3); break;
+    case 7: video_set_maria_palette((video_get_maria_palette() + 1) % MARIA_PALETTE_COUNT); break;
     case 8: g_btmap_visible = 1; g_options_popup_visible = 0; return;
     case 9: jni_send_bug_report_email(); g_options_popup_visible = 0; return;
     default: break;
