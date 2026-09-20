@@ -42,8 +42,7 @@ static void input_motion_options_popup(int y);
 static void input_draw_autosave_warn(SDL_Renderer *r, int lw, int lh);
 static void input_draw_btmap_popup(SDL_Renderer *r, int lw, int lh);
 static int  input_touch_autosave_warn(int x, int y, int lw, int lh);
-static int  dpad_compute_r(int lh);  /* compute dpad radius from current settings */
-static int  is_in_dpad_zone(int x, int y, int lh);
+static int  is_in_dpad_zone(int x, int y, int lw, int lh);
 
 /* ---- Virtual button IDs ---- */
 typedef enum {
@@ -195,35 +194,18 @@ static int is_paddle_mode(void)
     return machine_get_left_controller() == CTRL_PADDLE && g_paddle_control == 0;
 }
 
-/* Single source of truth for d-pad placement — hit test, zone test and draw
- * code all call this, so the three can never drift apart.
- *
- * The pad is anchored bottom-left but sits *above* the bottom action bar: it
- * used to be centred at lh - dr - 12dp, which pushed its lower edge 26-79px
- * (density dependent) into the SAVE/LOAD/ZOOM/OPTIONS band and, on narrower
- * screens, right over the SAVE button. Lifting it by the bar height keeps the
- * pad and the action bar disjoint. This matches the paddle slider, which is
- * already positioned above the bar. Returns the radius; centre via out params. */
-static int dpad_geom(int lh, int *out_cx, int *out_cy)
+/* Integer sqrt, for the circle-vs-bar geometry below. */
+static int isqrt_i(long v)
 {
-    int top_h    = px_dp(TOP_BAR_DP);
-    int ctrl_top = top_h + (lh - top_h) * 3 / 10;
-    int bar_top  = lh - px_dp(BOT_BAR_DP) * 4 / 5;
-
-    float ds = size_scales[g_dpad_size < 0 ? 0 : g_dpad_size > 2 ? 2 : g_dpad_size];
-    int   dr = (int)(px_dp(DPAD_R_DP) * ds);
-    if (dr < px_dp(20)) dr = px_dp(20);
-    /* Fit between the control zone top and the action bar */
-    int dr_max = (bar_top - ctrl_top) / 2 - px_dp(12);
-    if (dr_max > px_dp(20) && dr > dr_max) dr = dr_max;
-
-    if (out_cx) *out_cx = dr + px_dp(12);
-    if (out_cy) *out_cy = bar_top - dr - px_dp(12);
-    return dr;
+    if (v <= 0) return 0;
+    long r = 0;
+    while ((r + 1) * (r + 1) <= v) r++;
+    return (int)r;
 }
 
-/* Right edge of the LOAD action button — used as slider x1 */
-static int paddle_slider_x1(int sw)
+/* Left edge of the SAVE button — the action row is centred on the full screen,
+ * so this is the first thing the bottom-left d-pad can collide with. */
+static int action_bar_x0(int sw)
 {
     int fs = input_font_scale();
     int w_save        = font_string_width("SAVE",    fs) + px_dp(16);
@@ -232,8 +214,68 @@ static int paddle_slider_x1(int sw)
     int w_opts_layout = font_string_width("OPTIONS", fs) + px_dp(16);
     int gap           = px_dp(4);
     int total_act_w   = w_save + w_load + w_zoom + w_opts_layout + gap * 3;
-    int bx_start      = (sw - total_act_w) / 2;
-    return bx_start + w_save + gap + w_load;
+    return (sw - total_act_w) / 2;
+}
+
+/* Single source of truth for d-pad placement — hit test, zone test and draw
+ * code all call this, so the three can never drift apart.
+ *
+ * The pad is anchored in the bottom-left corner, centred at lh - dr - 12dp.
+ * Its lower edge therefore dips 26-79px (density dependent) into the
+ * SAVE/LOAD/ZOOM/OPTIONS band, which is harmless on its own — the action row
+ * is centred, so the band is empty out at the left margin. v1.3.1 lifted the
+ * pad clear of the band on every config to fix the handful where the disc
+ * really did reach the SAVE button; that moved the pad off the corner
+ * everywhere, which is the wrong trade. Instead, check whether the slice of
+ * the disc that lies inside the band actually reaches the buttons, and lift
+ * only then. Returns the radius; centre via out params. */
+static int dpad_geom(int lw, int lh, int *out_cx, int *out_cy)
+{
+    int top_h    = px_dp(TOP_BAR_DP);
+    int ctrl_top = top_h + (lh - top_h) * 3 / 10;
+    int bar_top  = lh - px_dp(BOT_BAR_DP) * 4 / 5;
+
+    float ds = size_scales[g_dpad_size < 0 ? 0 : g_dpad_size > 2 ? 2 : g_dpad_size];
+    int   base = (int)(px_dp(DPAD_R_DP) * ds);
+    if (base < px_dp(20)) base = px_dp(20);
+
+    /* Preferred placement: the bottom-left corner, fitted to the control zone */
+    int dr = base;
+    int dr_max = (lh - ctrl_top) / 2 - px_dp(12);
+    if (dr_max > px_dp(20) && dr > dr_max) dr = dr_max;
+    int cx = dr + px_dp(12);
+    int cy = lh - dr - px_dp(12);
+
+    /* How far the disc dips into the action-bar band, and how far right it
+     * reaches while it is down there (half-chord at the band's top edge). */
+    int dip = (cy + dr) - bar_top;
+    int reach = (dip <= 0) ? 0
+              : (dr <= dip) ? dr
+              : isqrt_i(2L * dr * dip - (long)dip * dip);
+
+    if (dip <= 0 || cx + reach <= action_bar_x0(lw) - px_dp(8)) {
+        if (out_cx) *out_cx = cx;
+        if (out_cy) *out_cy = cy;
+        return dr;
+    }
+
+    /* Only the tight configs get here: lift the pad clear of the bar, which is
+     * what the paddle slider already does. */
+    dr = base;
+    dr_max = (bar_top - ctrl_top) / 2 - px_dp(12);
+    if (dr_max > px_dp(20) && dr > dr_max) dr = dr_max;
+    if (out_cx) *out_cx = dr + px_dp(12);
+    if (out_cy) *out_cy = bar_top - dr - px_dp(12);
+    return dr;
+}
+
+/* Right edge of the LOAD action button — used as slider x1 */
+static int paddle_slider_x1(int sw)
+{
+    int fs     = input_font_scale();
+    int w_save = font_string_width("SAVE", fs) + px_dp(16);
+    int w_load = font_string_width("LOAD", fs) + px_dp(16);
+    return action_bar_x0(sw) + w_save + px_dp(4) + w_load;
 }
 
 /* Vertical center of the paddle slider track */
@@ -448,7 +490,7 @@ static VBtn get_virtual_btn_px(int x, int y, int lw, int lh, int *out_mask)
              * reporting VBTN_NONE — otherwise the d-pad reads as released.
              * Only d-pad-zone points fall through, so the fire-button zone
              * below still cannot claim a touch in the action bar. */
-            if (is_paddle_mode() || !is_in_dpad_zone(x, y, lh))
+            if (is_paddle_mode() || !is_in_dpad_zone(x, y, lw, lh))
                 return VBTN_NONE;
         }
     }
@@ -459,7 +501,7 @@ static VBtn get_virtual_btn_px(int x, int y, int lw, int lh, int *out_mask)
     /* D-pad zone: anchored bottom-left, matches draw code */
     {
         int dcx, dcy;
-        int dr = dpad_geom(lh, &dcx, &dcy);
+        int dr = dpad_geom(lw, lh, &dcx, &dcy);
         /* Hit box: full bounding square of the dpad */
         if (x <= dcx + dr && y >= dcy - dr) {
             /* In paddle DPad mode: simple left/right split — no center dead zone */
@@ -498,19 +540,13 @@ static VBtn get_virtual_btn_px(int x, int y, int lw, int lh, int *out_mask)
     return VBTN_NONE;
 }
 
-/* Return the dpad radius for the current settings and screen height. */
-static int dpad_compute_r(int lh)
-{
-    return dpad_geom(lh, NULL, NULL);
-}
-
 /* Return 1 if (x,y) is within the dpad bounding box for screen height lh.
  * Deliberately unbounded below and to the left: a finger that slides off the
  * pad toward the screen corner keeps holding its direction. */
-static int is_in_dpad_zone(int x, int y, int lh)
+static int is_in_dpad_zone(int x, int y, int lw, int lh)
 {
     int dcx, dcy;
-    int dr = dpad_geom(lh, &dcx, &dcy);
+    int dr = dpad_geom(lw, lh, &dcx, &dcy);
     return (x <= dcx + dr && y >= dcy - dr);
 }
 
@@ -599,7 +635,7 @@ void input_handle_event(SDL_Event *e)
                 g_paddle_finger_id    = e->tfinger.fingerId;
                 update_paddle_from_x(touch_x, sw);
             }
-        } else if (!g_dpad_touch_active && is_in_dpad_zone(touch_x, touch_y, sh)) {
+        } else if (!g_dpad_touch_active && is_in_dpad_zone(touch_x, touch_y, sw, sh)) {
             g_dpad_touch_active = 1;
             g_dpad_touch_x      = touch_x;
             g_dpad_touch_y      = touch_y;
@@ -985,9 +1021,9 @@ void input_draw_overlay(SDL_Renderer *renderer)
         int knob_x = slider_x0 + (slider_x1 - slider_x0) * g_paddle_val / 255;
         draw_circle_filled(renderer, knob_x, slider_cy, knob_r, 220, 120, 0, a_fill);
     } else {
-        /* ---- D-pad (bottom-left, above the action bar) ---- */
+        /* ---- D-pad (bottom-left corner) ---- */
         int dpad_cx, dpad_cy;
-        int dpad_r = dpad_geom(lh, &dpad_cx, &dpad_cy);
+        int dpad_r = dpad_geom(lw, lh, &dpad_cx, &dpad_cy);
 
         draw_circle_filled(renderer, dpad_cx, dpad_cy, dpad_r, 120, 120, 120, a_fill);
 

@@ -29,8 +29,8 @@ This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is
 ### v1.3.1 (2026-09-20)
 - Fixed: D-pad diagonals now work on touch — the pad is a true 8-way control with eight equal zones. Games that need a diagonal plus a button (such as the punch in Kung Fu Master) are playable again; previously only the four cardinal directions registered
 - Fixed: sliding your thumb to the bottom of the d-pad no longer reads as letting go of it
-- Fixed: on smaller screens the d-pad overlapped the SAVE button, where a down-and-right press could trigger a state save mid-game. The d-pad now sits clear of the bottom button bar
-- Note: as a result of the above, the Large d-pad is about 10% smaller on a few screen sizes. Small and Medium, and all tablet sizes, are unchanged
+- Fixed: on smaller screens the d-pad overlapped the SAVE button, where a down-and-right press could trigger a state save mid-game. The d-pad now keeps clear of the buttons
+- Note: the d-pad stays anchored in the bottom-left corner at its usual size. On a few narrow screens it sits slightly higher to clear the button bar, and the Large size is about 10% smaller there; every other screen size and d-pad size is unchanged
 - Bluetooth controllers were never affected by any of these and behave as before
 
 ### v1.3.0 (2026-09-18)
