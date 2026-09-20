@@ -1,11 +1,11 @@
 # emu7800forandroid
 This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is itself a port from EMU7800. EMU7800 was developed by Atari enthusiast Mike Murphy. Originally released around 2003, the emulator is an open-source project (GNU GPLv2) designed for Windows and later adapted for other platforms, with active development continuing on GitHub. Portions of this port of EMU7800 also utilized open-source code from Stella version 7.0 (released in Oct 2024). Stella was originally developed for Linux by Bradford W. Mott and is now maintained and developed by Stephen Anthony and the Stella Team.
 
-**Current version: 1.2.3**
+**Current version: 1.3.1**
 
 ## Features
 - Atari 2600 and 7800 ProSystem support
-- On-screen touch controls with multitouch D-pad and fire buttons
+- On-screen touch controls with multitouch 8-way D-pad (diagonals supported) and fire buttons
 - Atari 2600 paddle controller support — touch slider and DPad modes with auto-detection
 - Keyboard support
 - Built-in file picker for browsing and launching ROMs (.a26, .a78, .bin, .zip)
@@ -25,6 +25,20 @@ This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is
 - Auto-resize for book-style foldable support
 
 ## Changelog
+
+### v1.3.1 (2026-09-20)
+- Fixed: D-pad diagonals now work on touch — the pad is a true 8-way control with eight equal zones. Games that need a diagonal plus a button (such as the punch in Kung Fu Master) are playable again; previously only the four cardinal directions registered
+- Fixed: sliding your thumb to the bottom of the d-pad no longer reads as letting go of it
+- Fixed: on smaller screens the d-pad overlapped the SAVE button, where a down-and-right press could trigger a state save mid-game. The d-pad now sits clear of the bottom button bar
+- Note: as a result of the above, the Large d-pad is about 10% smaller on a few screen sizes. Small and Medium, and all tablet sizes, are unchanged
+- Bluetooth controllers were never affected by any of these and behave as before
+
+### v1.3.0 (2026-09-18)
+- Fixed: Summer Games, Winter Games, Plutos and Sirius no longer show garbled graphics — these carts have extra onboard RAM that could not be detected from the ROM alone, so a 431-entry cart database now identifies them
+- Fixed: Kung Fu Master and Missing in Action now draw their colour bands in the right places
+- Fixed: 7800 picture framing — the display now shows the 223 scanlines a TV actually shows, rather than all 242 the hardware draws, which pushed the picture too high and squashed it. Verified across all 74 7800 ROMs
+- Faster Atari 2600 emulation — roughly 22% quicker rendering on ARM devices, with output verified bit-identical across all 634 ROMs
+- Added: EMU7800 palette as a fourth 7800 colour palette option
 
 ### v1.2.3 (2026-05-21)
 - Fixed: Atari 2600 games with early VBLANK-off (e.g. Tapper) now display correctly — CRT display window correction removes overscan rows that real hardware hides behind the bezel
