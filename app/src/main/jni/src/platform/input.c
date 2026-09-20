@@ -43,6 +43,7 @@ static void input_draw_autosave_warn(SDL_Renderer *r, int lw, int lh);
 static void input_draw_btmap_popup(SDL_Renderer *r, int lw, int lh);
 static int  input_touch_autosave_warn(int x, int y, int lw, int lh);
 static int  dpad_compute_r(int lh);  /* compute dpad radius from current settings */
+static int  is_in_dpad_zone(int x, int y, int lh);
 
 /* ---- Virtual button IDs ---- */
 typedef enum {
@@ -51,6 +52,7 @@ typedef enum {
     VBTN_DOWN,
     VBTN_LEFT,
     VBTN_RIGHT,
+    VBTN_DPAD,      /* touch d-pad: direction(s) live in TouchSlot.dpad_mask */
     VBTN_FIRE1,
     VBTN_FIRE2,
     VBTN_PAUSE,
@@ -68,6 +70,7 @@ typedef enum {
 typedef struct {
     SDL_FingerID id;
     VBtn         btn;
+    int          dpad_mask;   /* DMASK_* bits, only when btn == VBTN_DPAD */
     int          active;
 } TouchSlot;
 static TouchSlot g_slots[MAX_FINGERS];
@@ -172,9 +175,51 @@ void input_set_display_density(float d) { if (d > 0.0f) g_density = d; }
 #define DIR_LEFT  2
 #define DIR_RIGHT 3
 
+/* Direction bitmask for the touch d-pad — lets one finger hold a diagonal.
+ * Bit positions match DIR_* so the mask maps straight onto machine_set_joystick(). */
+#define DMASK_UP    (1 << DIR_UP)
+#define DMASK_DOWN  (1 << DIR_DOWN)
+#define DMASK_LEFT  (1 << DIR_LEFT)
+#define DMASK_RIGHT (1 << DIR_RIGHT)
+
+/* Per-axis offset from the d-pad centre at which a direction engages, as a
+ * fraction of the d-pad radius. 3/8 == sin(22.5deg), which makes the eight
+ * sectors equal: +/-22.5deg for each cardinal, 45deg for each diagonal. */
+#define DPAD_THRESH_NUM 3
+#define DPAD_THRESH_DEN 8
+
+static int g_dpad_mask_applied = 0;   /* directions currently pushed to the machine */
+
 static int is_paddle_mode(void)
 {
     return machine_get_left_controller() == CTRL_PADDLE && g_paddle_control == 0;
+}
+
+/* Single source of truth for d-pad placement — hit test, zone test and draw
+ * code all call this, so the three can never drift apart.
+ *
+ * The pad is anchored bottom-left but sits *above* the bottom action bar: it
+ * used to be centred at lh - dr - 12dp, which pushed its lower edge 26-79px
+ * (density dependent) into the SAVE/LOAD/ZOOM/OPTIONS band and, on narrower
+ * screens, right over the SAVE button. Lifting it by the bar height keeps the
+ * pad and the action bar disjoint. This matches the paddle slider, which is
+ * already positioned above the bar. Returns the radius; centre via out params. */
+static int dpad_geom(int lh, int *out_cx, int *out_cy)
+{
+    int top_h    = px_dp(TOP_BAR_DP);
+    int ctrl_top = top_h + (lh - top_h) * 3 / 10;
+    int bar_top  = lh - px_dp(BOT_BAR_DP) * 4 / 5;
+
+    float ds = size_scales[g_dpad_size < 0 ? 0 : g_dpad_size > 2 ? 2 : g_dpad_size];
+    int   dr = (int)(px_dp(DPAD_R_DP) * ds);
+    if (dr < px_dp(20)) dr = px_dp(20);
+    /* Fit between the control zone top and the action bar */
+    int dr_max = (bar_top - ctrl_top) / 2 - px_dp(12);
+    if (dr_max > px_dp(20) && dr > dr_max) dr = dr_max;
+
+    if (out_cx) *out_cx = dr + px_dp(12);
+    if (out_cy) *out_cy = bar_top - dr - px_dp(12);
+    return dr;
 }
 
 /* Right edge of the LOAD action button — used as slider x1 */
@@ -214,13 +259,36 @@ static void set_dpad(int dir, int pressed)
     machine_set_joystick(0, dir, pressed);
 }
 
+/* Push the union of every d-pad finger's direction mask to the machine.
+ * Taking the union (rather than applying each slot as it changes) keeps the
+ * joystick correct when a second finger lands on the d-pad. */
+static void refresh_dpad_from_slots(void)
+{
+    int mask = 0;
+
+    if (machine_get_left_controller() != CTRL_PADDLE) {
+        for (int i = 0; i < MAX_FINGERS; i++) {
+            if (g_slots[i].active && g_slots[i].btn == VBTN_DPAD)
+                mask |= g_slots[i].dpad_mask;
+        }
+    }
+    if (mask == g_dpad_mask_applied) return;
+
+    set_dpad(DIR_UP,    (mask & DMASK_UP)    != 0);
+    set_dpad(DIR_DOWN,  (mask & DMASK_DOWN)  != 0);
+    set_dpad(DIR_LEFT,  (mask & DMASK_LEFT)  != 0);
+    set_dpad(DIR_RIGHT, (mask & DMASK_RIGHT) != 0);
+    g_dpad_mask_applied = mask;
+}
+
 static void apply_btn(VBtn btn, int pressed)
 {
     if (machine_get_left_controller() == CTRL_PADDLE) {
         if (g_paddle_control == 0) {
             /* Slider mode: direction inputs handled by touch slider */
             if (btn == VBTN_UP || btn == VBTN_DOWN ||
-                btn == VBTN_LEFT || btn == VBTN_RIGHT) return;
+                btn == VBTN_LEFT || btn == VBTN_RIGHT ||
+                btn == VBTN_DPAD) return;
         } else {
             /* DPad mode: left/right nudge paddle on press, hold for continuous */
             if (btn == VBTN_LEFT) {
@@ -241,7 +309,7 @@ static void apply_btn(VBtn btn, int pressed)
                 }
                 return;
             }
-            if (btn == VBTN_UP || btn == VBTN_DOWN) return;
+            if (btn == VBTN_UP || btn == VBTN_DOWN || btn == VBTN_DPAD) return;
         }
     }
     switch (btn) {
@@ -249,6 +317,8 @@ static void apply_btn(VBtn btn, int pressed)
     case VBTN_DOWN:   set_dpad(DIR_DOWN,  pressed); break;
     case VBTN_LEFT:   set_dpad(DIR_LEFT,  pressed); break;
     case VBTN_RIGHT:  set_dpad(DIR_RIGHT, pressed); break;
+    /* Directions come from the slot's mask via refresh_dpad_from_slots() */
+    case VBTN_DPAD:   break;
     case VBTN_FIRE1:  machine_set_trigger(0, pressed);  break;
     case VBTN_FIRE2:  machine_set_trigger2(0, pressed); break;
     case VBTN_RESET:
@@ -325,8 +395,10 @@ static int fire_overlaps_options(int lw, int lh, int fs)
  * Bar heights use fixed dp values (never screen %).
  * D-pad / fire zones are screen-fraction anchors (position only, not size).
  */
-static VBtn get_virtual_btn_px(int x, int y, int lw, int lh)
+static VBtn get_virtual_btn_px(int x, int y, int lw, int lh, int *out_mask)
 {
+    if (out_mask) *out_mask = 0;
+
     int fs    = input_font_scale();
     int top_h = px_dp(TOP_BAR_DP);
     int btn_w = font_string_width("SELECT", fs) + px_dp(16);
@@ -370,7 +442,14 @@ static VBtn get_virtual_btn_px(int x, int y, int lw, int lh)
                 if (x >= bx && x < bx + act_ws[i]) return act[i];
                 bx += act_ws[i] + gap;
             }
-            return VBTN_NONE;
+            /* The bottom of the d-pad reaches into this band (by 26-79px,
+             * depending on density). A finger dragged down there missed every
+             * action button, so fall through to the d-pad test instead of
+             * reporting VBTN_NONE — otherwise the d-pad reads as released.
+             * Only d-pad-zone points fall through, so the fire-button zone
+             * below still cannot claim a touch in the action bar. */
+            if (is_paddle_mode() || !is_in_dpad_zone(x, y, lh))
+                return VBTN_NONE;
         }
     }
 
@@ -379,28 +458,27 @@ static VBtn get_virtual_btn_px(int x, int y, int lw, int lh)
 
     /* D-pad zone: anchored bottom-left, matches draw code */
     {
-        float ds  = size_scales[g_dpad_size < 0 ? 0 : g_dpad_size > 2 ? 2 : g_dpad_size];
-        int   dr  = (int)(px_dp(DPAD_R_DP) * ds);
-        if (dr < px_dp(20)) dr = px_dp(20);
-        int dr_max = (lh - ctrl_top) / 2 - px_dp(12);
-        if (dr_max > px_dp(20) && dr > dr_max) dr = dr_max;
-        int dcx = dr + px_dp(12);
-        int dcy = lh - dr - px_dp(12);
+        int dcx, dcy;
+        int dr = dpad_geom(lh, &dcx, &dcy);
         /* Hit box: full bounding square of the dpad */
         if (x <= dcx + dr && y >= dcy - dr) {
             /* In paddle DPad mode: simple left/right split — no center dead zone */
             if (machine_get_left_controller() == CTRL_PADDLE && g_paddle_control == 1) {
                 return (x < dcx) ? VBTN_LEFT : VBTN_RIGHT;
             }
-            float rel_x = (float)(x - (dcx - dr)) / (float)(dr * 2);
-            float rel_y = (float)(y - (dcy - dr)) / (float)(dr * 2);
-            int col = (int)(rel_x * 3.0f); if (col > 2) col = 2; if (col < 0) col = 0;
-            int row = (int)(rel_y * 3.0f); if (row > 2) row = 2; if (row < 0) row = 0;
-            if (row == 0) return VBTN_UP;
-            if (row == 2) return VBTN_DOWN;
-            if (col == 0) return VBTN_LEFT;
-            if (col == 2) return VBTN_RIGHT;
-            return VBTN_NONE;
+            /* Independent per-axis tests, so a corner touch holds two
+             * directions at once (diagonals). */
+            int thresh = dr * DPAD_THRESH_NUM / DPAD_THRESH_DEN;
+            int dx = x - dcx;
+            int dy = y - dcy;
+            int mask = 0;
+            if (dy < -thresh) mask |= DMASK_UP;
+            if (dy >  thresh) mask |= DMASK_DOWN;
+            if (dx < -thresh) mask |= DMASK_LEFT;
+            if (dx >  thresh) mask |= DMASK_RIGHT;
+            if (!mask) return VBTN_NONE;   /* centre dead zone */
+            if (out_mask) *out_mask = mask;
+            return VBTN_DPAD;
         }
     }
 
@@ -423,22 +501,16 @@ static VBtn get_virtual_btn_px(int x, int y, int lw, int lh)
 /* Return the dpad radius for the current settings and screen height. */
 static int dpad_compute_r(int lh)
 {
-    int top_h    = px_dp(TOP_BAR_DP);
-    int ctrl_top = top_h + (lh - top_h) * 3 / 10;
-    float ds = size_scales[g_dpad_size < 0 ? 0 : g_dpad_size > 2 ? 2 : g_dpad_size];
-    int dr = (int)(px_dp(DPAD_R_DP) * ds);
-    if (dr < px_dp(20)) dr = px_dp(20);
-    int dr_max = (lh - ctrl_top) / 2 - px_dp(12);
-    if (dr_max > px_dp(20) && dr > dr_max) dr = dr_max;
-    return dr;
+    return dpad_geom(lh, NULL, NULL);
 }
 
-/* Return 1 if (x,y) is within the dpad bounding box for screen height lh. */
+/* Return 1 if (x,y) is within the dpad bounding box for screen height lh.
+ * Deliberately unbounded below and to the left: a finger that slides off the
+ * pad toward the screen corner keeps holding its direction. */
 static int is_in_dpad_zone(int x, int y, int lh)
 {
-    int dr  = dpad_compute_r(lh);
-    int dcx = dr + px_dp(12);
-    int dcy = lh - dr - px_dp(12);
+    int dcx, dcy;
+    int dr = dpad_geom(lh, &dcx, &dcy);
     return (x <= dcx + dr && y >= dcy - dr);
 }
 
@@ -460,6 +532,7 @@ void input_init(void)
     g_confirm_visible       = 0;
     g_confirm_result        = -1;
     g_dpad_touch_active     = 0;
+    g_dpad_mask_applied     = 0;
     g_paddle_val            = 127;
     g_paddle_touch_active   = 0;
     g_paddle_control        = 0;
@@ -500,13 +573,16 @@ void input_handle_event(SDL_Event *e)
           if (sw <= 0 || sh <= 0) { sw = 1024; sh = 600; } }
         int touch_x = (int)(e->tfinger.x * sw);
         int touch_y = (int)(e->tfinger.y * sh);
-        VBtn btn = get_virtual_btn_px(touch_x, touch_y, sw, sh);
+        int  btn_mask = 0;
+        VBtn btn = get_virtual_btn_px(touch_x, touch_y, sw, sh, &btn_mask);
         for (int i = 0; i < MAX_FINGERS; i++) {
             if (!g_slots[i].active) {
-                g_slots[i].active = 1;
-                g_slots[i].id     = e->tfinger.fingerId;
-                g_slots[i].btn    = btn;
+                g_slots[i].active    = 1;
+                g_slots[i].id        = e->tfinger.fingerId;
+                g_slots[i].btn       = btn;
+                g_slots[i].dpad_mask = btn_mask;
                 apply_btn(btn, 1);
+                refresh_dpad_from_slots();
                 break;
             }
         }
@@ -563,6 +639,7 @@ void input_handle_event(SDL_Event *e)
             if (g_slots[i].active && g_slots[i].id == e->tfinger.fingerId) {
                 apply_btn(g_slots[i].btn, 0);
                 g_slots[i].active = 0;
+                refresh_dpad_from_slots();
                 break;
             }
         }
@@ -596,8 +673,10 @@ void input_handle_event(SDL_Event *e)
             int my = (int)(e->tfinger.y * sh);
             for (int i = 0; i < MAX_FINGERS; i++) {
                 if (g_slots[i].active && g_slots[i].id == e->tfinger.fingerId) {
-                    VBtn new_btn = get_virtual_btn_px(mx, my, sw, sh);
-                    if (new_btn != g_slots[i].btn) {
+                    int  new_mask = 0;
+                    VBtn new_btn = get_virtual_btn_px(mx, my, sw, sh, &new_mask);
+                    if (new_btn != g_slots[i].btn ||
+                        new_mask != g_slots[i].dpad_mask) {
                         /* Paddle DPad: a finger sliding L↔R resets the hold timer
                          * but does NOT fire a nudge — prevents oscillation near center */
                         if (machine_get_left_controller() == CTRL_PADDLE &&
@@ -607,11 +686,13 @@ void input_handle_event(SDL_Event *e)
                             /* Finger slides L↔R: update direction state, no nudge */
                             g_paddle_dpad_left  = (new_btn == VBTN_LEFT);
                             g_paddle_dpad_right = (new_btn == VBTN_RIGHT);
-                        } else {
+                        } else if (new_btn != g_slots[i].btn) {
                             apply_btn(g_slots[i].btn, 0);
                             apply_btn(new_btn, 1);
                         }
-                        g_slots[i].btn = new_btn;
+                        g_slots[i].btn       = new_btn;
+                        g_slots[i].dpad_mask = new_mask;
+                        refresh_dpad_from_slots();
                     }
                     break;
                 }
@@ -637,13 +718,16 @@ void input_handle_event(SDL_Event *e)
         if (win) SDL_GL_GetDrawableSize(win, &sw, &sh);
         else { sw = 1024; sh = 600; }
         if (sw <= 0 || sh <= 0) break;
-        VBtn btn = get_virtual_btn_px(e->button.x, e->button.y, sw, sh);
+        int  btn_mask = 0;
+        VBtn btn = get_virtual_btn_px(e->button.x, e->button.y, sw, sh, &btn_mask);
         for (int i = 0; i < MAX_FINGERS; i++) {
             if (!g_slots[i].active) {
-                g_slots[i].active = 1;
-                g_slots[i].id     = (SDL_FingerID)(-1 - e->button.which);
-                g_slots[i].btn    = btn;
+                g_slots[i].active    = 1;
+                g_slots[i].id        = (SDL_FingerID)(-1 - e->button.which);
+                g_slots[i].btn       = btn;
+                g_slots[i].dpad_mask = btn_mask;
                 apply_btn(btn, 1);
+                refresh_dpad_from_slots();
                 break;
             }
         }
@@ -656,6 +740,7 @@ void input_handle_event(SDL_Event *e)
             if (g_slots[i].active && g_slots[i].id == fake_id) {
                 apply_btn(g_slots[i].btn, 0);
                 g_slots[i].active = 0;
+                refresh_dpad_from_slots();
                 break;
             }
         }
@@ -900,15 +985,9 @@ void input_draw_overlay(SDL_Renderer *renderer)
         int knob_x = slider_x0 + (slider_x1 - slider_x0) * g_paddle_val / 255;
         draw_circle_filled(renderer, knob_x, slider_cy, knob_r, 220, 120, 0, a_fill);
     } else {
-        /* ---- D-pad (bottom-left corner) ---- */
-        float dpad_scale = size_scales[g_dpad_size < 0 ? 0 : g_dpad_size > 2 ? 2 : g_dpad_size];
-        int dpad_r = (int)(px_dp(DPAD_R_DP) * dpad_scale);
-        if (dpad_r < px_dp(20)) dpad_r = px_dp(20);
-        int dpad_r_max = ctrl_h / 2 - px_dp(12);
-        if (dpad_r_max > px_dp(20) && dpad_r > dpad_r_max) dpad_r = dpad_r_max;
-
-        int dpad_cx = dpad_r + px_dp(12);
-        int dpad_cy = main_bot - dpad_r - px_dp(12);
+        /* ---- D-pad (bottom-left, above the action bar) ---- */
+        int dpad_cx, dpad_cy;
+        int dpad_r = dpad_geom(lh, &dpad_cx, &dpad_cy);
 
         draw_circle_filled(renderer, dpad_cx, dpad_cy, dpad_r, 120, 120, 120, a_fill);
 
