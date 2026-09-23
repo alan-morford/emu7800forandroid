@@ -477,6 +477,59 @@ static void set_blon(TIA *tia)
 }
 
 /* ========================================================================
+ * In-flight player copies across RESPx
+ *
+ * On a real TIA a player copy's start signal is decoded from the position
+ * counter a few clocks before its first pixel; once decoded, the copy is
+ * shifted out by its own graphics scan counter and finishes even if RESPx
+ * resets the position counter mid-way. The mask tables are indexed by the
+ * position counter alone, so without this the reset truncates the copy.
+ * Galaxian relies on it: it re-strobes RESP0 every 33 clocks with NUSIZ0=3,
+ * and the +32 copy of each strobe is already underway when the next lands.
+ *
+ * Not part of the TIA struct (which is saved verbatim): a tail lasts at most
+ * one copy width and never survives the end of a scanline.
+ * ======================================================================== */
+
+#define PX_DECODE_LEAD 5   /* counter clocks from start decode to first pixel */
+
+typedef struct {
+    int ctr;               /* frozen-at-RESP counter, keeps advancing; <0 = idle */
+    int type;              /* NUSIZ player type at the time of RESP */
+    int lo, hi;            /* mask index range [lo, hi) of the in-flight copy */
+} PxTail;
+
+static PxTail g_px_tail[2] = { { -1, 0, 0, 0 }, { -1, 0, 0, 0 } };
+
+static void px_tail_capture(PxTail *t, int ctr, int type, int suppress)
+{
+    static const int starts[3] = { 16, 32, 64 };
+    int k, w, lo;
+
+    t->ctr = -1;
+    if (ctr < 0) return;
+
+    /* Main copy (not suppressed): starts at index 1, or 2 for double/quad */
+    if (!suppress) {
+        lo = (type == 5 || type == 7) ? 2 : 1;
+        w  = type == 5 ? 16 : type == 7 ? 32 : 8;
+        if (ctr < lo + w) {
+            t->ctr = ctr; t->type = type; t->lo = lo; t->hi = lo + w;
+            return;
+        }
+    }
+    /* Repeated copies at +16/+32/+64 (index +1 from the table shift) */
+    for (k = 0; k < 3; k++) {
+        lo = starts[k] + 1;
+        if (!g_px_mask[1][type][lo]) continue;   /* copy not present */
+        if (ctr >= lo - PX_DECODE_LEAD && ctr < lo + 8) {
+            t->ctr = ctr; t->type = type; t->lo = lo; t->hi = lo + 8;
+            return;
+        }
+    }
+}
+
+/* ========================================================================
  * Core Renderer — port of TIA.cs RenderFromStartClockTo()
  *
  * Renders TIA from start_clock to end_clock, one color clock at a time.
@@ -526,6 +579,8 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
             TIA_ADV160(tia->m0);
             TIA_ADV160(tia->m1);
             TIA_ADV160(tia->bl);
+            if (g_px_tail[0].ctr >= 0 && ++g_px_tail[0].ctr >= g_px_tail[0].hi) g_px_tail[0].ctr = -1;
+            if (g_px_tail[1].ctr >= 0 && ++g_px_tail[1].ctr >= g_px_tail[1].hi) g_px_tail[1].ctr = -1;
         }
 
         /* HMOVE compare: once every 1/4 CLK (phase 0) when active */
@@ -589,7 +644,9 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
             }
 
             /* Player 1 */
-            if (tia->p1 >= 0 && (g_px_mask[tia->p1suppress][tia->p1type][tia->p1] & tia->eff_grp1) != 0) {
+            if ((tia->p1 >= 0 && (g_px_mask[tia->p1suppress][tia->p1type][tia->p1] & tia->eff_grp1) != 0)
+                || (g_px_tail[1].ctr >= g_px_tail[1].lo
+                    && (g_px_mask[0][g_px_tail[1].type][g_px_tail[1].ctr] & tia->eff_grp1) != 0)) {
                 fbyte = tia->colup1;
                 cxflags |= CXF_P1;
             }
@@ -601,7 +658,9 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
             }
 
             /* Player 0 */
-            if (tia->p0 >= 0 && (g_px_mask[tia->p0suppress][tia->p0type][tia->p0] & tia->eff_grp0) != 0) {
+            if ((tia->p0 >= 0 && (g_px_mask[tia->p0suppress][tia->p0type][tia->p0] & tia->eff_grp0) != 0)
+                || (g_px_tail[0].ctr >= g_px_tail[0].lo
+                    && (g_px_mask[0][g_px_tail[0].type][g_px_tail[0].ctr] & tia->eff_grp0) != 0)) {
                 fbyte = tia->colup0;
                 cxflags |= CXF_P0;
             }
@@ -631,8 +690,10 @@ static void render_from_start_clock_to(TIA *tia, uint64_t end_clock)
                 }
             }
 
-            if (tia->hsync == 227)
+            if (tia->hsync == 227) {
                 tia->scanline++;
+                g_px_tail[0].ctr = g_px_tail[1].ctr = -1;
+            }
         }
 
         /* Clear suppress when position counter reaches 156 */
@@ -747,7 +808,6 @@ static void op_nusiz0(TIA *tia, uint8_t data)
     tia->m0size = (tia->regw[NUSIZ0] & 0x30) >> 4;
     tia->m0type = tia->regw[NUSIZ0] & 0x07;
     tia->p0type = tia->m0type;
-    tia->p0suppress = 0;
 }
 
 static void op_nusiz1(TIA *tia, uint8_t data)
@@ -756,7 +816,6 @@ static void op_nusiz1(TIA *tia, uint8_t data)
     tia->m1size = (tia->regw[NUSIZ1] & 0x30) >> 4;
     tia->m1type = tia->regw[NUSIZ1] & 0x07;
     tia->p1type = tia->m1type;
-    tia->p1suppress = 0;
 }
 
 static void op_colup0(TIA *tia, uint8_t data)
@@ -810,6 +869,7 @@ static void op_pf(TIA *tia, uint16_t addr, uint8_t data)
 
 static void op_resp0(TIA *tia, int poke_op_hsync, int poke_op_hsync_delta)
 {
+    px_tail_capture(&g_px_tail[0], tia->p0, tia->p0type, tia->p0suppress);
     if (poke_op_hsync < 68) {
         tia->p0 = 0;
     } else if (tia->hmove_latch && poke_op_hsync >= 68 && poke_op_hsync < 76) {
@@ -824,6 +884,7 @@ static void op_resp0(TIA *tia, int poke_op_hsync, int poke_op_hsync_delta)
 
 static void op_resp1(TIA *tia, int poke_op_hsync, int poke_op_hsync_delta)
 {
+    px_tail_capture(&g_px_tail[1], tia->p1, tia->p1type, tia->p1suppress);
     if (poke_op_hsync < 68) {
         tia->p1 = 0;
     } else if (tia->hmove_latch && poke_op_hsync >= 68 && poke_op_hsync < 76) {
@@ -1278,6 +1339,7 @@ void tia_reset(TIA *tia)
 
 void tia_start_frame(TIA *tia)
 {
+    g_px_tail[0].ctr = g_px_tail[1].ctr = -1;
     tia->wsync_delay_clocks = 0;
     tia->end_of_frame = 0;
     tia->scanline = 0;

@@ -1,7 +1,7 @@
 # emu7800forandroid
 This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is itself a port from EMU7800. EMU7800 was developed by Atari enthusiast Mike Murphy. Originally released around 2003, the emulator is an open-source project (GNU GPLv2) designed for Windows and later adapted for other platforms, with active development continuing on GitHub. Portions of this port of EMU7800 also utilized open-source code from Stella version 7.0 (released in Oct 2024). Stella was originally developed for Linux by Bradford W. Mott and is now maintained and developed by Stephen Anthony and the Stella Team.
 
-**Current version: 1.3.1**
+**Current version: 1.3.2**
 
 ## Features
 - Atari 2600 and 7800 ProSystem support
@@ -25,6 +25,11 @@ This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is
 - Auto-resize for book-style foldable support
 
 ## Changelog
+
+### v1.3.2 (2026-09-23)
+- Fixed: Galaxian (2600) showed only four aliens per row, with half-drawn "ghost" aliens between them that could be shot and exploded over and over without ever disappearing. Every row now shows its full formation of seven complete aliens
+- Fixed: the same drawing bug clipped or hid sprites in 13 other 2600 games: Plaque Attack (half-drawn teeth), Communist Mutants from Space (half-drawn aliens), Rabbit Transit (missing flowers), Sweat! The Decathlon Game (hurdle rows drawn as plain lines), RealSports Tennis (patchy net), Track and Field (gaps in the crowd), Beamrider and Robot Tank (reserve ships/tanks missing), Kabobber, Space Shuttle, Berenstain Bears, Miner 2049er and Suicide Mission
+- Existing save states still load
 
 ### v1.3.1 (2026-09-20)
 - Fixed: D-pad diagonals now work on touch — the pad is a true 8-way control with eight equal zones. Games that need a diagonal plus a button (such as the punch in Kung Fu Master) are playable again; previously only the four cardinal directions registered
