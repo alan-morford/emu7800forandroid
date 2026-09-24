@@ -26,6 +26,12 @@ This 100% Claude Code vibe-coded project is a port of EMU7800 for webOS which is
 
 ## Changelog
 
+### v1.3.3 (2026-09-24)
+- Fixed: holding FIRE while tapping OPTIONS or BACK could leave FIRE stuck on for the rest of the game. Lifting a finger while a popup was open never released its button
+- Fixed: with two fingers on the same button, lifting one released the button even though the other was still holding it
+- Fixed: buttons and directions no longer stay held after switching apps, pulling down the notification shade, or otherwise leaving the game mid-press
+- Touch input only; no change to emulation, and existing save states still load
+
 ### v1.3.2 (2026-09-23)
 - Fixed: Galaxian (2600) showed only four aliens per row, with half-drawn "ghost" aliens between them that could be shot and exploded over and over without ever disappearing. Every row now shows its full formation of seven complete aliens
 - Fixed: the same drawing bug clipped or hid sprites in 13 other 2600 games: Plaque Attack (half-drawn teeth), Communist Mutants from Space (half-drawn aliens), Rabbit Transit (missing flowers), Sweat! The Decathlon Game (hurdle rows drawn as plain lines), RealSports Tennis (patchy net), Track and Field (gaps in the crowd), Beamrider and Robot Tank (reserve ships/tanks missing), Kabobber, Space Shuttle, Berenstain Bears, Miner 2049er and Suicide Mission

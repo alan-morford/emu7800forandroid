@@ -393,6 +393,62 @@ static void apply_btn(VBtn btn, int pressed)
     }
 }
 
+/* Return 1 if an active slot other than `skip` is holding `btn`. */
+static int btn_held_elsewhere(VBtn btn, int skip)
+{
+    for (int i = 0; i < MAX_FINGERS; i++) {
+        if (i != skip && g_slots[i].active && g_slots[i].btn == btn)
+            return 1;
+    }
+    return 0;
+}
+
+/* Release the button a finger was holding, unless another finger still holds
+ * it (two fingers on FIRE, lift one: FIRE stays down). */
+static void release_slot_btn(int i)
+{
+    if (!btn_held_elsewhere(g_slots[i].btn, i))
+        apply_btn(g_slots[i].btn, 0);
+}
+
+/* Free the slot tracking `id` and release its button.  Returns 1 if found. */
+static int release_finger(SDL_FingerID id)
+{
+    for (int i = 0; i < MAX_FINGERS; i++) {
+        if (g_slots[i].active && g_slots[i].id == id) {
+            g_slots[i].active = 0;
+            release_slot_btn(i);
+            refresh_dpad_from_slots();
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Drop every held input: touch slots, d-pad/paddle finger tracking, and the
+ * machine's joystick, fire and console switches.  A FINGERUP (or key/controller
+ * button-up) that never arrives — app backgrounded or focus lost mid-touch —
+ * would otherwise leave that input held until the next ROM launch. */
+void input_release_all(void)
+{
+    memset(g_slots, 0, sizeof(g_slots));
+    g_dpad_touch_active   = 0;
+    g_paddle_touch_active = 0;
+    g_paddle_dpad_left    = 0;
+    g_paddle_dpad_right   = 0;
+    g_dpad_mask_applied   = 0;
+    set_dpad(DIR_UP,    0);
+    set_dpad(DIR_DOWN,  0);
+    set_dpad(DIR_LEFT,  0);
+    set_dpad(DIR_RIGHT, 0);
+    machine_set_trigger(0, 0);
+    machine_set_trigger2(0, 0);
+    g_reset_held  = 0;
+    g_select_held = 0;
+    machine_set_switch(0, 0);
+    machine_set_switch(1, 0);
+}
+
 /*
  * Returns 1 if the leftmost visible fire button overlaps the OPTIONS button
  * horizontally, meaning we should use the shorter "OPTS" label.
@@ -655,6 +711,18 @@ void input_handle_event(SDL_Event *e)
         int px = (int)(e->tfinger.x * sw);
         int py_coord = (int)(e->tfinger.y * sh);
 
+        /* Free this finger's game slot before any popup gets the event: a
+         * finger held on FIRE while OPTIONS/BACK opens a popup lifts while
+         * the popup is up, and would otherwise leave FIRE held for good. */
+        release_finger(e->tfinger.fingerId);
+        if (is_paddle_mode()) {
+            if (g_paddle_touch_active && e->tfinger.fingerId == g_paddle_finger_id)
+                g_paddle_touch_active = 0;
+        } else {
+            if (g_dpad_touch_active && e->tfinger.fingerId == g_dpad_finger_id)
+                g_dpad_touch_active = 0;
+        }
+
         if (g_opt_autosave_warn) {
             input_touch_autosave_warn(px, py_coord, sw, sh);
             return;
@@ -670,21 +738,6 @@ void input_handle_event(SDL_Event *e)
         if (g_confirm_visible) {
             input_handle_confirm_touch(px, py_coord, sw, sh);
             return;
-        }
-        for (int i = 0; i < MAX_FINGERS; i++) {
-            if (g_slots[i].active && g_slots[i].id == e->tfinger.fingerId) {
-                apply_btn(g_slots[i].btn, 0);
-                g_slots[i].active = 0;
-                refresh_dpad_from_slots();
-                break;
-            }
-        }
-        if (is_paddle_mode()) {
-            if (g_paddle_touch_active && e->tfinger.fingerId == g_paddle_finger_id)
-                g_paddle_touch_active = 0;
-        } else {
-            if (g_dpad_touch_active && e->tfinger.fingerId == g_dpad_finger_id)
-                g_dpad_touch_active = 0;
         }
         break;
     }
@@ -723,7 +776,7 @@ void input_handle_event(SDL_Event *e)
                             g_paddle_dpad_left  = (new_btn == VBTN_LEFT);
                             g_paddle_dpad_right = (new_btn == VBTN_RIGHT);
                         } else if (new_btn != g_slots[i].btn) {
-                            apply_btn(g_slots[i].btn, 0);
+                            release_slot_btn(i);
                             apply_btn(new_btn, 1);
                         }
                         g_slots[i].btn       = new_btn;
@@ -771,15 +824,7 @@ void input_handle_event(SDL_Event *e)
     }
 
     case SDL_MOUSEBUTTONUP: {
-        SDL_FingerID fake_id = (SDL_FingerID)(-1 - e->button.which);
-        for (int i = 0; i < MAX_FINGERS; i++) {
-            if (g_slots[i].active && g_slots[i].id == fake_id) {
-                apply_btn(g_slots[i].btn, 0);
-                g_slots[i].active = 0;
-                refresh_dpad_from_slots();
-                break;
-            }
-        }
+        release_finger((SDL_FingerID)(-1 - e->button.which));
         break;
     }
 
@@ -852,6 +897,12 @@ void input_handle_event(SDL_Event *e)
         }
         break;
     }
+
+    /* ---- Window focus ---- */
+    case SDL_WINDOWEVENT:
+        if (e->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+            input_release_all();
+        break;
 
     /* ---- Keyboard ---- */
     case SDL_KEYDOWN:

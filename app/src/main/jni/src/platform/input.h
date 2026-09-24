@@ -37,6 +37,10 @@ void input_init(void);
 /* Dispatch one SDL event into the input layer. */
 void input_handle_event(SDL_Event *e);
 
+/* Release every held input (touch, joystick, fire, switches); call when a
+ * button-up may never arrive, e.g. on backgrounding or focus loss. */
+void input_release_all(void);
+
 /* Draw the on-screen virtual gamepad overlay. */
 void input_draw_overlay(SDL_Renderer *renderer);
 

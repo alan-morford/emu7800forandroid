@@ -336,6 +336,7 @@ int SDL_main(int argc, char *argv[])
             case SDL_APP_WILLENTERBACKGROUND:
                 g_emulator_paused = 1;
                 audio_pause(1);
+                input_release_all();
                 break;
 
             case SDL_APP_DIDENTERFOREGROUND:
